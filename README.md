@@ -18,6 +18,11 @@ Documentation is using Sphinx and can be built locally using:
 cd package/docs
 make html
 ```
+
+or
+
+    ant doc
+
 and viewed using
 ```
 firefox package/docs/build/html/index.html
@@ -27,6 +32,22 @@ The documentation is also setup at `readthedocs.io`.
 
 Documentation links:
 * http://streamsxhdfs.readthedocs.io
+
+## Version update
+
+To change the version information of the Python package, edit following files:
+
+- ./package/docs/source/conf.py
+- ./package/streamsx/hdfs/\_\_init\_\_.py
+
+When the development status changes, edit the *classifiers* in
+
+- ./package/setup.py
+
+When the documented sample must be changed, change it here:
+
+- ./package/streamsx/hdfs/\_\_init\_\_.py
+- ./package/DESC.txt
 
 ## Test
 
@@ -51,12 +72,17 @@ python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestParams
 
 This test requires STREAMS_INSTALL set and a running Streams instance.
 
-Required envionment variable for the `com.ibm.streamsx.hdfs` toolkit  location: `STREAMS_HDFS_TOOLKIT`
+Required envionment variable for the `com.ibm.streamsx.hdfs` toolkit location: `STREAMS_HDFS_TOOLKIT`
 
 ```
 cd package
 python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestDistributed
 ```
+
+or
+
+    ant test
+
 
 ### Test with Streaming Analytics Service
 
@@ -67,6 +93,26 @@ Required envionment variable for the `com.ibm.streamsx.hdfs` toolkit  location: 
 ```
 cd package
 python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestCloud.test_close_on_tuples streamsx.hdfs.tests.test_hdfs.TestCloud.test_hdfs_uri
+```
+
+or
+
+    ant test-sas
+
+
+#### Remote build
+
+For using the toolkit from the build service (**force_remote_build**) run the test with:
+
+Run the test with:
+
+    ant test-sas-remote
+
+or
+
+```
+cd package
+python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestCloudRemote.test_close_on_tuples streamsx.hdfs.tests.test_hdfs.TestCloudRemote.test_hdfs_uri
 ```
 
 
