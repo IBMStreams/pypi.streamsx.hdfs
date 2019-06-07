@@ -25,7 +25,7 @@ def toolkit_env_var():
     result = True
     try:
         os.environ['STREAMS_HDFS_TOOLKIT']
-    except KeyError: 
+    except KeyError:
         result = False
     return result
 
@@ -33,7 +33,7 @@ def streams_install_env_var():
     result = True
     try:
         os.environ['STREAMS_INSTALL']
-    except KeyError: 
+    except KeyError:
         result = False
     return result
 
@@ -41,7 +41,7 @@ def site_xml_env_var():
     result = True
     try:
         os.environ['HDFS_SITE_XML']
-    except KeyError: 
+    except KeyError:
         result = False
     return result
 
@@ -49,7 +49,7 @@ def cloud_creds_env_var():
     result = True
     try:
         os.environ['ANALYTICS_ENGINE']
-    except KeyError: 
+    except KeyError:
         result = False
     return result
 
@@ -114,7 +114,7 @@ class TestDistributed(unittest.TestCase):
     def setUp(self):
         Tester.setup_distributed(self)
         self.hdfs_toolkit_location = os.environ['STREAMS_HDFS_TOOLKIT']
- 
+
      # ------------------------------------
     @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
     def test_hdfs_config_path(self):
@@ -142,7 +142,7 @@ class TestDistributed(unittest.TestCase):
         cfg = {}
         job_config = streamsx.topology.context.JobConfig(tracing='info')
         job_config.add(cfg)
-        cfg[streamsx.topology.context.ConfigParams.SSL_VERIFY] = False     
+        cfg[streamsx.topology.context.ConfigParams.SSL_VERIFY] = False
 
         # Run the test
         tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
@@ -176,7 +176,7 @@ class TestDistributed(unittest.TestCase):
         cfg = {}
         job_config = streamsx.topology.context.JobConfig(tracing='info')
         job_config.add(cfg)
-        cfg[streamsx.topology.context.ConfigParams.SSL_VERIFY] = False     
+        cfg[streamsx.topology.context.ConfigParams.SSL_VERIFY] = False
 
         # Run the test
         tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
@@ -205,7 +205,7 @@ class TestDistributed(unittest.TestCase):
         cfg = {}
         job_config = streamsx.topology.context.JobConfig(tracing='info')
         job_config.add(cfg)
-        cfg[streamsx.topology.context.ConfigParams.SSL_VERIFY] = False     
+        cfg[streamsx.topology.context.ConfigParams.SSL_VERIFY] = False
 
         # Run the test
         tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
@@ -239,3 +239,14 @@ class TestCloudRemote(TestCloud):
         Tester.setup_streaming_analytics(self, force_remote_build=True)
         self.hdfs_toolkit_location = None
 
+
+class TestICPRemote(TestDistributed):
+    """ Test in Cloud Pak using remote toolkit from cloud build service """
+
+    @classmethod
+    def setUpClass(self):
+        super().setUpClass()
+
+    def setUp(self):
+        Tester.setup_distributed(self)
+        self.hdfs_toolkit_location = None
