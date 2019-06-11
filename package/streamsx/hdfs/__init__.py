@@ -64,12 +64,12 @@ a file to HDFS. Scan for created file on HDFS and read the content::
     r.print()
 
     submit('STREAMING_ANALYTICS_SERVICE', topo)
-    # Use for IBM Streams including IBM Cloud Private for Data
+    # Use for IBM Streams including IBM Cloud Pak for Data
     # submit ('DISTRIBUTED', topo)
 
 """
 
-__version__='1.0.1'
+__version__='1.0.2'
 
 __all__ = ['scan', 'read', 'write']
 from streamsx.hdfs._hdfs import scan, read, write
