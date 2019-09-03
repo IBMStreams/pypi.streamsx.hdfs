@@ -22,13 +22,9 @@ Credentials
 The mandatory JSON elements are "user", "password" and "webhdfs"::
 
     {
-        "cluster": {
-            "password": "<PASSWORD>",
-            "service_endpoints": {
-                "webhdfs": "https://<HOST>:<PORT>/gateway/default/webhdfs/v1/"
-            },
-            "user": "<USER>"
-        },
+        "user": "<USER>"
+        "password": "<PASSWORD>",
+        "webhdfs": "https://<HOST>:<PORT>"
     }
 
 If you are using HDFS server(s) different to the "Analytics Engine" service, 
@@ -69,7 +65,7 @@ a file to HDFS. Scan for created file on HDFS and read the content::
 
 """
 
-__version__='1.0.2'
+__version__='1.1.0'
 
-__all__ = ['scan', 'read', 'write']
-from streamsx.hdfs._hdfs import scan, read, write
+__all__ = ['download_toolkit', 'configure_connection', 'scan', 'read', 'write']
+from streamsx.hdfs._hdfs import download_toolkit, configure_connection, scan, read, write
