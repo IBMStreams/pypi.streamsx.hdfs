@@ -27,7 +27,7 @@
     </target>
 
    <target name="test" depends="clean">
-    <exec executable="/bin/sh" 
+    <exec executable="/bin/sh"
       outputproperty="toolkit.test.output" errorproperty="toolkit.test.error" resultproperty="toolkit.test.result"
       dir="${package}">
       <arg value="-c"/>
@@ -45,7 +45,7 @@
    </target>
 
    <target name="test-sas" depends="clean">
-    <exec executable="/bin/sh" 
+    <exec executable="/bin/sh"
       outputproperty="toolkit.test.output" errorproperty="toolkit.test.error" resultproperty="toolkit.test.result"
       dir="${package}">
       <arg value="-c"/>
@@ -61,13 +61,31 @@
       </condition>
     </fail>
    </target>
-	
+
    <target name="test-sas-remote" depends="clean">
-    <exec executable="/bin/sh" 
+    <exec executable="/bin/sh"
       outputproperty="toolkit.test.output" errorproperty="toolkit.test.error" resultproperty="toolkit.test.result"
       dir="${package}">
       <arg value="-c"/>
       <arg value="unset STREAMS_INSTALL;python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestCloudRemote.test_close_on_tuples streamsx.hdfs.tests.test_hdfs.TestCloudRemote.test_hdfs_uri"/>
+    </exec>
+    <echo message="${toolkit.test.output}" if:set="toolkit.test.output"/>
+    <echo message="${toolkit.test.error}" if:set="toolkit.test.error"/>
+    <fail message="The test failed - result ${toolkit.test.result}.">
+      <condition>
+        <not>
+          <equals arg1="${toolkit.test.result}" arg2="0"/>
+        </not>
+      </condition>
+    </fail>
+   </target>
+
+   <target name="test-icp-remote" depends="clean">
+    <exec executable="/bin/sh"
+      outputproperty="toolkit.test.output" errorproperty="toolkit.test.error" resultproperty="toolkit.test.result"
+      dir="${package}">
+      <arg value="-c"/>
+      <arg value="unset STREAMS_INSTALL;python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestICPRemote.test_close_on_tuples streamsx.hdfs.tests.test_hdfs.TestICPRemote.test_hdfs_uri"/>
     </exec>
     <echo message="${toolkit.test.output}" if:set="toolkit.test.output"/>
     <echo message="${toolkit.test.error}" if:set="toolkit.test.error"/>
