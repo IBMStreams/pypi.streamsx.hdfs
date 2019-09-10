@@ -3,15 +3,15 @@
 # Copyright IBM Corp. 2019
 
 import datetime
-import os
 import json
-from tempfile import gettempdir
 import streamsx.spl.op
 import streamsx.spl.types
+
 from streamsx.topology.schema import CommonSchema, StreamSchema
-from streamsx.spl.types import rstring
 from urllib.parse import urlparse
 from streamsx.toolkits import download_toolkit
+from enum import Enum
+
 
 _TOOLKIT_NAME = 'com.ibm.streamsx.hdfs'
 
@@ -21,7 +21,20 @@ FileInfoSchema = StreamSchema('tuple<rstring fileName, uint64 fileSize>')
 ``'tuple<rstring fileName, uint64 fileSize>'``
 """
 
+FileCopySchema = StreamSchema('tuple<rstring message, uint64 elapsedTime>')
+"""Structured schema of the file copy response tuple. This schema is the output schema of the copy method.
 
+``'tuple<rstring message, uint64 elapsedTime>'``
+"""
+
+DirectoryScanSchema = StreamSchema('tuple<rstring fileName>')
+"""Structured schema of the directory scan response tuple. This schema is the output schema of the scan method.
+
+``'tuple<rstring fileName>'``
+"""
+
+
+   
 def _add_toolkit_dependency(topo, version):
     # IMPORTANT: Dependency of this python wrapper to a specific toolkit version
     # This is important when toolkit is not set with streamsx.spl.toolkit.add_toolkit (selecting toolkit from remote build service)
@@ -62,6 +75,32 @@ def _check_time_param(time_value, parameter_name):
     if result <= 1:
         raise ValueError("Invalid "+parameter_name+" value. Value must be at least one second.")
     return result
+
+class CopyDirection(Enum):
+    """Defines File Copy directions for HDFS2FileCopy.
+
+    .. versionadded:: 1.2
+    """  
+    copyFromLocalFile = 0
+    """Copy from local to HDFS 
+    """
+
+    copyToLocalFile = 1
+    """Copy from HDFS to local 
+    """
+
+def _convert_copy_direction_string_to_enum(value):
+    """convert string into enum value
+    """  
+    direction = CopyDirection(0)
+    if value == 'copyFromLocalFile':
+        direction = CopyDirection(0)    
+    elif value == 'copyToLocalFile':
+        direction = CopyDirection(1) 
+    else:
+        raise NotImplementedError("Copy Direction parsing not implemented: " + value)
+    return direction
+
 
 def configure_connection (instance, name = 'hdfs', credentials = None):
     """Configures IBM Streams for a certain connection.
@@ -114,7 +153,7 @@ def configure_connection (instance, name = 'hdfs', credentials = None):
 def download_toolkit(url=None, target_dir=None):
     r"""Downloads the latest HDFS toolkit from GitHub.
 
-    Example for updating the HDFS toolkit for your topology with the latest toolkit from GitHub::
+    Example for updating the HDFS toolkit for your topology with the latest toolkit from GitHub::
 
         import streamsx.hdfs as hdfs
         # download HDFS toolkit from GitHub
@@ -122,22 +161,22 @@ def download_toolkit(url=None, target_dir=None):
         # add the toolkit to topology
         streamsx.spl.toolkit.add_toolkit(topology, hdfs_toolkit_location)
 
-    Example for updating the topology with a specific version of the HDFS toolkit using a URL::
+    Example for updating the topology with a specific version of the HDFS toolkit using a URL::
 
         import streamsx.hdfs as hdfs
         url500 = 'https://github.com/IBMStreams/streamsx.hdfs/releases/download/v5.0.0/streamx.hdfs.toolkits-5.0.0-20190902-1637.tgz'
         hdfs_toolkit_location = hdfs.download_toolkit(url=url500)
         streamsx.spl.toolkit.add_toolkit(topology, hdfs_toolkit_location)
 
-    Args:
-        url(str): Link to toolkit archive (\*.tgz) to be downloaded. Use this parameter to 
+    Args:
+        url(str): Link to toolkit archive (\*.tgz) to be downloaded. Use this parameter to 
             download a specific version of the toolkit.
         target_dir(str): the directory where the toolkit is unpacked to. If a relative path is given,
             the path is appended to the system temporary directory, for example to /tmp on Unix/Linux systems.
             If target_dir is ``None`` a location relative to the system temporary directory is chosen.
 
-    Returns:
-        str: the location of the downloaded HDFS toolkit
+    Returns:
+        str: the location of the downloaded HDFS toolkit
 
     .. note:: This function requires an outgoing Internet connection
     .. versionadded:: 1.1
@@ -146,14 +185,14 @@ def download_toolkit(url=None, target_dir=None):
     return _toolkit_location
 
 
-def scan(topology, credentials, directory, pattern=None, init_delay=None, schema=CommonSchema.String, name=None):
+def scan(topology, credentials, directory, pattern=None, init_delay=None, name=None):
     """Scans a Hadoop Distributed File System directory for new or modified files.
 
     Repeatedly scans a HDFS directory and writes the names of new or modified files that are found in the directory to the output stream.
 
     Args:
         topology(Topology): Topology to contain the returned stream.
-        credentials(dict|file): The credentials of the IBM cloud Analytics Engine service in *JSON* or the path to the *configuration file* (``hdfs-site.xml`` or ``core-site.xml``). If the *configuration file* is specified, then this file will be copied to the 'etc' directory of the application bundle.     
+        credentials(dict|str|file): The credentials of the IBM cloud Analytics Engine service in *JSON* (idct) or JSON string (str) or the path to the *configuration file* (``hdfs-site.xml`` or ``core-site.xml``). If the *configuration file* is specified, then this file will be copied to the 'etc' directory of the application bundle.     
         directory(str): The directory to be scanned. Relative path is relative to the '/user/userid/' directory. 
         pattern(str): Limits the file names that are listed to the names that match the specified regular expression.
         init_delay(int|float|datetime.timedelta): The time to wait in seconds before the operator scans the directory for the first time. If not set, then the default value is 0.
@@ -161,19 +200,25 @@ def scan(topology, credentials, directory, pattern=None, init_delay=None, schema
         name(str): Source name in the Streams context, defaults to a generated name.
 
     Returns:
-        Output Stream containing file names. Default output schema is ``CommonSchema.String``.
-    """
+        Output Stream containing file names with schema :py:const:`~streamsx.hdfs.DirectoryScanSchema`.
+     """
 
-    _op = _HDFS2DirectoryScan(topology, directory=directory, pattern=pattern, schema=schema, name=name)
+    _op = _HDFS2DirectoryScan(topology, directory=directory, pattern=pattern, schema=DirectoryScanSchema, name=name)
+
     if isinstance(credentials, dict):
         hdfs_uri, user, password = _read_ae_service_credentials(credentials)
         _op.params['hdfsUri'] = hdfs_uri
         _op.params['hdfsUser'] = user
         _op.params['hdfsPassword'] = password
     else:
-        # expect core-site.xml file in credentials param 
-        topology.add_file_dependency(credentials, 'etc')
-        _op.params['configPath'] = 'etc'
+        # JSON string
+        if credentials.startswith('{'):
+            _op.params['credentials'] = credentials
+        else:    
+            # expect core-site.xml file in credentials param 
+            topology.add_file_dependency(credentials, 'etc')
+            _op.params['configPath'] = 'etc'
+
     if init_delay is not None:
         _op.params['initDelay'] = streamsx.spl.types.float64(_check_time_param(init_delay, 'init_delay'))
 
@@ -187,7 +232,7 @@ def read(stream, credentials, schema=CommonSchema.String, name=None):
 
     Args:
         stream(Stream): Stream of tuples containing file names to be read. Supports ``CommonSchema.String`` as input. Alternative a structured streams schema with a single attribute of type ``rstring`` is supported.
-        credentials(dict|file): The credentials of the IBM cloud Analytics Engine service in *JSON* or the path to the *configuration file* (``hdfs-site.xml`` or ``core-site.xml``). If the *configuration file* is specified, then this file will be copied to the 'etc' directory of the application bundle.     
+        credentials(dict|str|file): The credentials of the IBM cloud Analytics Engine service in *JSON* (idct) or JSON string (str) or the path to the *configuration file* (``hdfs-site.xml`` or ``core-site.xml``). If the *configuration file* is specified, then this file will be copied to the 'etc' directory of the application bundle.     
         schema(Schema): Output schema for the file content, defaults to ``CommonSchema.String``. Alternative a structured streams schema with a single attribute of type ``rstring`` or ``blob`` is supported.
         name(str): Name of the operator in the Streams context, defaults to a generated name.
 
@@ -196,20 +241,25 @@ def read(stream, credentials, schema=CommonSchema.String, name=None):
     """
 
     _op = _HDFS2FileSource(stream, schema=schema, name=name)
+    
     if isinstance(credentials, dict):
         hdfs_uri, user, password = _read_ae_service_credentials(credentials)
         _op.params['hdfsUri'] = hdfs_uri
         _op.params['hdfsUser'] = user
         _op.params['hdfsPassword'] = password
-    else:
-        # expect core-site.xml file in credentials param 
-        stream.topology.add_file_dependency(credentials, 'etc')
-        _op.params['configPath'] = 'etc'
+    else: 
+        # JSON string
+        if credentials.startswith('{'):
+            _op.params['credentials'] = credentials
+        else:    
+            # expect core-site.xml file in credentials param 
+            stream.topology.add_file_dependency(credentials, 'etc')
+            _op.params['configPath'] = 'etc'
 
     return _op.outputs[0]
 
 
-def write(stream, credentials, file, time_per_file=None, tuples_per_file=None, bytes_per_file=None, name=None):
+def write(stream, credentials, file, schema=None, time_per_file=None, tuples_per_file=None, bytes_per_file=None, name=None):
     """Writes files to a Hadoop Distributed File System.
 
     When writing to a file, that exists already on HDFS with the same name, then this file is overwritten.
@@ -225,7 +275,7 @@ def write(stream, credentials, file, time_per_file=None, tuples_per_file=None, b
 
     Args:
         stream(Stream): Stream of tuples containing the data to be written to files. Supports ``CommonSchema.String`` as input. Alternative a structured streams schema with a single attribute of type ``rstring`` or ``blob`` is supported.
-        credentials(dict|file): The credentials of the IBM cloud Analytics Engine service in *JSON* or the path to the *configuration file* (``hdfs-site.xml`` or ``core-site.xml``). If the *configuration file* is specified, then this file will be copied to the 'etc' directory of the application bundle.     
+        credentials(dict|str|file): The credentials of the IBM cloud Analytics Engine service in *JSON* (idct) or JSON string (str) or the path to the *configuration file* (``hdfs-site.xml`` or ``core-site.xml``). If the *configuration file* is specified, then this file will be copied to the 'etc' directory of the application bundle.     
         file(str): Specifies the name of the file. The file parameter can optionally contain the following variables, which are evaluated at runtime to generate the file name:
          
           * %FILENUM The file number, which starts at 0 and counts up as a new file is created for writing.
@@ -247,15 +297,19 @@ def write(stream, credentials, file, time_per_file=None, tuples_per_file=None, b
         raise ValueError("The parameters are mutually exclusive: bytes_per_file, time_per_file, tuples_per_file")
 
     _op = _HDFS2FileSink(stream, file=file, schema=FileInfoSchema, name=name)
+    
     if isinstance(credentials, dict):
         hdfs_uri, user, password = _read_ae_service_credentials(credentials)
         _op.params['hdfsUri'] = hdfs_uri
         _op.params['hdfsUser'] = user
         _op.params['hdfsPassword'] = password
     else:
-        # expect core-site.xml file in credentials param 
-        stream.topology.add_file_dependency(credentials, 'etc')
-        _op.params['configPath'] = 'etc'
+        if credentials.startswith('{'):
+            _op.params['credentials'] = credentials
+        else:    
+            # expect core-site.xml file in credentials param 
+            stream.topology.add_file_dependency(credentials, 'etc')
+            _op.params['configPath'] = 'etc'
 
     if time_per_file is None and tuples_per_file is None and bytes_per_file is None:
         _op.params['closeOnPunct'] = _op.expression('true')
@@ -268,14 +322,54 @@ def write(stream, credentials, file, time_per_file=None, tuples_per_file=None, b
     return _op.outputs[0]
 
 
+def copy(stream, credentials, direction, hdfsFile=None, hdfsFileAttrName=None, localFile=None, name=None):
+    """Copy a Hadoop Distributed File to local and copy a local file to te HDFS.
+
+    Repeatedly scans a HDFS directory and writes the names of new or modified files that are found in the directory to the output stream.
+
+    Args:
+        topology(Topology): Topology to contain the returned stream.
+        credentials(dict|str|file): The credentials of the IBM cloud Analytics Engine service in *JSON* (idct) or JSON string (str) or the path to the *configuration file* (``hdfs-site.xml`` or ``core-site.xml``). If the *configuration file* is specified, then this file will be copied to the 'etc' directory of the application bundle.     
+        direction(str): This mandatory parameter specifies the direction of copy. The parameter can be set with the following values. **'copyFromLocalFile'** Copy a file from local disk to the HDFS file system. **'copyToLocalFile'** Copy a file from HDFS file system to the local disk.
+        hdfsFile(str): This parameter Specifies the name of HDFS file or directory. If the name starts with a slash, it is considered an absolute path of HDFS file that you want to use. If it does not start with a slash, it is considered a relative path, relative to the /user/userid/hdfsFile .
+        localFile(str): This parameter specifies the name of local file to be copied. If the name starts with a slash, it is considered an absolute path of local file that you want to copy. If it does not start with a slash, it is considered a relative path, relative to your project data directory. 
+        schema(Schema): Optional output stream schema. Default is ``CommonSchema.String``. Alternative a structured streams schema with a single attribute of type ``rstring`` is supported.  
+        name(str): Source name in the Streams context, defaults to a generated name.
+
+    Returns:
+        Output Stream containing the result message and teh elapsed time with schema :py:const:`~streamsx.hdfs.FileCopySchema`.
+    """
+
+    Direction=_convert_copy_direction_string_to_enum(direction)
+    
+    _op = _HDFS2FileCopy(stream, direction=Direction, hdfsFileAttrName=hdfsFileAttrName, localFile=localFile , schema=FileCopySchema, name=name)
+    
+    if isinstance(credentials, dict):
+        hdfs_uri, user, password = _read_ae_service_credentials(credentials)
+        _op.params['hdfsUri'] = hdfs_uri
+        _op.params['hdfsUser'] = user
+        _op.params['hdfsPassword'] = password
+    else:
+        if credentials.startswith('{'):
+            _op.params['credentials'] = credentials
+        else:    
+            # expect core-site.xml file in credentials param 
+            stream.topology.add_file_dependency(credentials, 'etc')
+            _op.params['configPath'] = 'etc'
+
+    return _op.outputs[0]
+
+
+
+
 class _HDFS2DirectoryScan(streamsx.spl.op.Source):
-    def __init__(self, topology, schema, vmArg=None, authKeytab=None, authPrincipal=None, configPath=None, credFile=None, directory=None, hdfsPassword=None, hdfsUri=None, hdfsUser=None, initDelay=None, keyStorePassword=None, keyStorePath=None, libPath=None, pattern=None, policyFilePath=None, reconnectionBound=None, reconnectionInterval=None, reconnectionPolicy=None, sleepTime=None, strictMode=None, name=None):
+    def __init__(self, topology, schema, appConfigName=None, authKeytab=None, authPrincipal=None, configPath=None, credFile=None, credentials=None, directory=None, hdfsPassword=None, hdfsUri=None, hdfsUser=None, initDelay=None, keyStorePassword=None, keyStorePath=None, libPath=None, pattern=None, policyFilePath=None, reconnectionBound=None, reconnectionInterval=None, reconnectionPolicy=None, sleepTime=None, strictMode=None, vmArg=None, name=None):
         kind="com.ibm.streamsx.hdfs::HDFS2DirectoryScan"
-        inputs=None
+ #       inputs=None
         schemas=schema
         params = dict()
-        if vmArg is not None:
-            params['vmArg'] = vmArg
+        if appConfigName is not None:
+            params['appConfigName'] = appConfigName
         if authKeytab is not None:
             params['authKeytab'] = authKeytab
         if authPrincipal is not None:
@@ -284,6 +378,8 @@ class _HDFS2DirectoryScan(streamsx.spl.op.Source):
             params['configPath'] = configPath
         if credFile is not None:
             params['credFile'] = credFile
+        if credentials is not None:
+            params['credentials'] = credentials
         if directory is not None:
             params['directory'] = directory
         if hdfsPassword is not None:
@@ -314,19 +410,23 @@ class _HDFS2DirectoryScan(streamsx.spl.op.Source):
             params['sleepTime'] = sleepTime
         if strictMode is not None:
             params['strictMode'] = strictMode
+        if vmArg is not None:
+            params['vmArg'] = vmArg
 
         super(_HDFS2DirectoryScan, self).__init__(topology,kind,schemas,params,name)
 
 
 class _HDFS2FileSource(streamsx.spl.op.Invoke):
-    def __init__(self, stream, schema=None, authKeytab=None, authPrincipal=None, blockSize=None, configPath=None, credFile=None, encoding=None, file=None, hdfsPassword=None, hdfsUri=None, hdfsUser=None, initDelay=None, keyStorePassword=None, keyStorePath=None, libPath=None, policyFilePath=None, reconnectionBound=None, reconnectionInterval=None, reconnectionPolicy=None, vmArg=None, name=None):
+    def __init__(self, stream, schema=None, appConfigName=None, authKeytab=None, authPrincipal=None, blockSize=None, configPath=None, credFile=None, 
+                 credentials=None, encoding=None, file=None, hdfsPassword=None, hdfsUri=None, hdfsUser=None, initDelay=None, keyStorePassword=None, 
+                 keyStorePath=None, libPath=None, policyFilePath=None, reconnectionBound=None, reconnectionInterval=None, reconnectionPolicy=None, vmArg=None, name=None):
         topology = stream.topology
         kind="com.ibm.streamsx.hdfs::HDFS2FileSource"
         inputs=stream
-        schemas=schema
+#        schemas=schema
         params = dict()
-        if vmArg is not None:
-            params['vmArg'] = vmArg
+        if appConfigName is not None:
+            params['appConfigName'] = appConfigName
         if authKeytab is not None:
             params['authKeytab'] = authKeytab
         if authPrincipal is not None:
@@ -337,6 +437,8 @@ class _HDFS2FileSource(streamsx.spl.op.Invoke):
             params['configPath'] = configPath
         if credFile is not None:
             params['credFile'] = credFile
+        if credentials is not None:
+            params['credentials'] = credentials
         if encoding is not None:
             params['encoding'] = encoding
         if file is not None:
@@ -363,19 +465,24 @@ class _HDFS2FileSource(streamsx.spl.op.Invoke):
             params['reconnectionInterval'] = reconnectionInterval
         if reconnectionPolicy is not None:
             params['reconnectionPolicy'] = reconnectionPolicy
+        if vmArg is not None:
+            params['vmArg'] = vmArg
 
         super(_HDFS2FileSource, self).__init__(topology,kind,inputs,schema,params,name)
 
 
+
 class _HDFS2FileSink(streamsx.spl.op.Invoke):
-    def __init__(self, stream, schema=None, authKeytab=None, authPrincipal=None, bytesPerFile=None, closeOnPunct=None, configPath=None, credFile=None, encoding=None, file=None, fileAttributeName=None, hdfsPassword=None, hdfsUri=None, hdfsUser=None, keyStorePassword=None, keyStorePath=None, libPath=None, policyFilePath=None, reconnectionBound=None, reconnectionInterval=None, reconnectionPolicy=None, tempFile=None, timeFormat=None, timePerFile=None, tuplesPerFile=None, vmArg=None, name=None):
+    def __init__(self, stream, schema=None, appConfigName=None, authKeytab=None, authPrincipal=None, bytesPerFile=None, closeOnPunct=None, configPath=None, 
+                 credFile=None, credentials=None, encoding=None, file=None, fileAttributeName=None, hdfsPassword=None, hdfsUri=None, hdfsUser=None, keyStorePassword=None, keyStorePath=None, libPath=None, policyFilePath=None, 
+                 reconnectionBound=None, reconnectionInterval=None, reconnectionPolicy=None, tempFile=None, timeFormat=None, timePerFile=None, tuplesPerFile=None, vmArg=None, name=None):
         topology = stream.topology
         kind="com.ibm.streamsx.hdfs::HDFS2FileSink"
         inputs=stream
-        schemas=schema
+ #       schemas=schema
         params = dict()
-        if vmArg is not None:
-            params['vmArg'] = vmArg
+        if appConfigName is not None:
+            params['appConfigName'] = appConfigName
         if authKeytab is not None:
             params['authKeytab'] = authKeytab
         if authPrincipal is not None:
@@ -388,6 +495,8 @@ class _HDFS2FileSink(streamsx.spl.op.Invoke):
             params['configPath'] = configPath
         if credFile is not None:
             params['credFile'] = credFile
+        if credentials is not None:
+            params['credentials'] = credentials
         if encoding is not None:
             params['encoding'] = encoding
         if file is not None:
@@ -422,8 +531,70 @@ class _HDFS2FileSink(streamsx.spl.op.Invoke):
             params['timePerFile'] = timePerFile
         if tuplesPerFile is not None:
             params['tuplesPerFile'] = tuplesPerFile
+        if vmArg is not None:
+            params['vmArg'] = vmArg
 
         super(_HDFS2FileSink, self).__init__(topology,kind,inputs,schema,params,name)
+
+
+class _HDFS2FileCopy(streamsx.spl.op.Invoke):
+    def __init__(self, stream, schema=None, appConfigName=None, authKeytab=None, authPrincipal=None, configPath=None, credFile=None,  credentials=None, 
+                 deleteSourceFile=None,  direction=None, hdfsFile=None, hdfsFileAttrName=None, hdfsPassword=None, hdfsUri=None, 
+                 hdfsUser=None, keyStorePassword=None, keyStorePath=None, libPath=None, localFile=None, localFileAttrName =None, overwriteDestinationFile=None, 
+                 policyFilePath=None, reconnectionBound=None, reconnectionInterval=None, reconnectionPolicy=None, vmArg=None, name=None):
+        topology = stream.topology
+        kind="com.ibm.streamsx.hdfs::HDFS2FileCopy"
+        inputs=stream
+#        schemas=schema
+        params = dict()
+        if appConfigName is not None:
+            params['appConfigName'] = appConfigName
+        if authKeytab is not None:
+            params['authKeytab'] = authKeytab
+        if authPrincipal is not None:
+            params['authPrincipal'] = authPrincipal
+        if configPath is not None:
+            params['configPath'] = configPath
+        if credFile is not None:
+            params['credFile'] = credFile
+        if credentials is not None:
+            params['credentials'] = credentials
+        if deleteSourceFile is not None:
+            params['deleteSourceFile'] = deleteSourceFile
+        if direction is not None:
+            params['direction'] = direction
+        if hdfsFile is not None:
+            params['hdfsFile'] = hdfsFile
+        if hdfsFileAttrName is not None:
+            params['hdfsFileAttrName'] = hdfsFileAttrName
+        if hdfsPassword is not None:
+            params['hdfsPassword'] = hdfsPassword
+        if hdfsUri is not None:
+            params['hdfsUri'] = hdfsUri
+        if hdfsUser is not None:
+            params['hdfsUser'] = hdfsUser
+        if keyStorePassword is not None:
+            params['keyStorePassword'] = keyStorePassword
+        if keyStorePath is not None:
+            params['keyStorePath'] = keyStorePath
+        if libPath is not None:
+            params['libPath'] = libPath
+        if localFile is not None:
+            params['localFile'] = localFile
+        if localFileAttrName is not None:
+            params['localFileAttrName'] = localFileAttrName
+        if overwriteDestinationFile is not None:
+            params['overwriteDestinationFile'] = overwriteDestinationFile
+        if reconnectionBound is not None:
+            params['reconnectionBound'] = reconnectionBound
+        if reconnectionInterval is not None:
+            params['reconnectionInterval'] = reconnectionInterval
+        if reconnectionPolicy is not None:
+            params['reconnectionPolicy'] = reconnectionPolicy
+        if vmArg is not None:
+            params['vmArg'] = vmArg
+
+        super(_HDFS2FileCopy, self).__init__(topology,kind,inputs,schema,params,name)
 
 
 
