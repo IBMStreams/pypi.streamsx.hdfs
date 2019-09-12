@@ -259,7 +259,7 @@ def read(stream, credentials, schema=CommonSchema.String, name=None):
     return _op.outputs[0]
 
 
-def write(stream, credentials, file, schema=None, time_per_file=None, tuples_per_file=None, bytes_per_file=None, name=None):
+def write(stream, credentials, file=None, fileAttributeName=None, schema=None, time_per_file=None, tuples_per_file=None, bytes_per_file=None, name=None):
     """Writes files to a Hadoop Distributed File System.
 
     When writing to a file, that exists already on HDFS with the same name, then this file is overwritten.
@@ -296,7 +296,7 @@ def write(stream, credentials, file, schema=None, time_per_file=None, tuples_per
     if (time_per_file is not None and tuples_per_file is not None) or (tuples_per_file is not None and bytes_per_file is not None) or (time_per_file is not None and bytes_per_file is not None):
         raise ValueError("The parameters are mutually exclusive: bytes_per_file, time_per_file, tuples_per_file")
 
-    _op = _HDFS2FileSink(stream, file=file, schema=FileInfoSchema, name=name)
+    _op = _HDFS2FileSink(stream, file=file, fileAttributeName=fileAttributeName, schema=FileInfoSchema, name=name)
     
     if isinstance(credentials, dict):
         hdfs_uri, user, password = _read_ae_service_credentials(credentials)
