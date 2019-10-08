@@ -6,7 +6,6 @@ import streamsx as streamsx
 from streamsx.topology.tester import Tester
 import streamsx.spl.toolkit as tk
 import streamsx.rest as sr
-from streamsx.topology.schema import StreamSchema
 
 
 import unittest
