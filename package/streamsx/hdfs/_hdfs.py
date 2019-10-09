@@ -4,13 +4,13 @@
 
 import datetime
 import json
+from urllib.parse import urlparse
+from enum import Enum
+
 import streamsx.spl.op
 import streamsx.spl.types
-
 from streamsx.topology.schema import CommonSchema, StreamSchema
-from urllib.parse import urlparse
 from streamsx.toolkits import download_toolkit
-from enum import Enum
 
 
 _TOOLKIT_NAME = 'com.ibm.streamsx.hdfs'
@@ -33,15 +33,12 @@ DirectoryScanSchema = StreamSchema('tuple<rstring fileName>')
 ``'tuple<rstring fileName>'``
 """
 
-
-   
-def _add_toolkit_dependency(topo, version):
+def _add_toolkit_dependency(topo):
     # IMPORTANT: Dependency of this python wrapper to a specific toolkit version
     # This is important when toolkit is not set with streamsx.spl.toolkit.add_toolkit (selecting toolkit from remote build service)
-    streamsx.spl.toolkit.add_toolkit_dependency(topo, _TOOLKIT_NAME, version)
+    streamsx.spl.toolkit.add_toolkit_dependency(topo, _TOOLKIT_NAME, '[5.0.0,6.0.0)')
 
-
-def _read_ae_service_credentials(credentials):
+def _read_service_credentials(credentials):
     hdfs_uri = ""
     user = ""
     password = ""
@@ -64,6 +61,23 @@ def _read_ae_service_credentials(credentials):
     uri_parsed = urlparse(hdfs_uri)
     hdfs_uri = 'webhdfs://'+uri_parsed.netloc
     return hdfs_uri, user, password
+
+def _check_vresion_credentials(credentials, _op, topology):
+    # check streamsx.hdfs version
+    _add_toolkit_dependency(topology)
+
+    if isinstance(credentials, dict):
+        hdfs_uri, user, password = _read_service_credentials(credentials)
+        _op.params['hdfsUri'] = hdfs_uri
+        _op.params['hdfsUser'] = user
+        _op.params['hdfsPassword'] = password
+    #check if the credentials is a valid JSON string
+    elif _is_a_valid_json(credentials):
+        _op.params['credentials'] = credentials
+    else:    
+        # expect core-site.xml file in credentials param 
+        topology.add_file_dependency(credentials, 'etc')
+        _op.params['configPath'] = 'etc'
    
 def _check_time_param(time_value, parameter_name):
     if isinstance(time_value, datetime.timedelta):
@@ -76,6 +90,15 @@ def _check_time_param(time_value, parameter_name):
         raise ValueError("Invalid "+parameter_name+" value. Value must be at least one second.")
     return result
 
+def _is_a_valid_json(credentials):
+    # checking if the input string is a valid JSON string  
+    try: 
+        json.loads(credentials) 
+        return 1
+    except:
+        pass
+        return 0
+           
 class CopyDirection(Enum):
     """Defines File Copy directions for HDFS2FileCopy.
 
@@ -184,6 +207,7 @@ def download_toolkit(url=None, target_dir=None):
     _toolkit_location = streamsx.toolkits.download_toolkit (toolkit_name=_TOOLKIT_NAME, url=url, target_dir=target_dir)
     return _toolkit_location
 
+    
 
 def scan(topology, credentials, directory, pattern=None, init_delay=None, name=None):
     """Scans a Hadoop Distributed File System directory for new or modified files.
@@ -205,19 +229,7 @@ def scan(topology, credentials, directory, pattern=None, init_delay=None, name=N
 
     _op = _HDFS2DirectoryScan(topology, directory=directory, pattern=pattern, schema=DirectoryScanSchema, name=name)
 
-    if isinstance(credentials, dict):
-        hdfs_uri, user, password = _read_ae_service_credentials(credentials)
-        _op.params['hdfsUri'] = hdfs_uri
-        _op.params['hdfsUser'] = user
-        _op.params['hdfsPassword'] = password
-    else:
-        # JSON string
-        if credentials.startswith('{'):
-            _op.params['credentials'] = credentials
-        else:    
-            # expect core-site.xml file in credentials param 
-            topology.add_file_dependency(credentials, 'etc')
-            _op.params['configPath'] = 'etc'
+    _check_vresion_credentials(credentials, _op, topology)
 
     if init_delay is not None:
         _op.params['initDelay'] = streamsx.spl.types.float64(_check_time_param(init_delay, 'init_delay'))
@@ -241,20 +253,8 @@ def read(stream, credentials, schema=CommonSchema.String, name=None):
     """
 
     _op = _HDFS2FileSource(stream, schema=schema, name=name)
-    
-    if isinstance(credentials, dict):
-        hdfs_uri, user, password = _read_ae_service_credentials(credentials)
-        _op.params['hdfsUri'] = hdfs_uri
-        _op.params['hdfsUser'] = user
-        _op.params['hdfsPassword'] = password
-    else: 
-        # JSON string
-        if credentials.startswith('{'):
-            _op.params['credentials'] = credentials
-        else:    
-            # expect core-site.xml file in credentials param 
-            stream.topology.add_file_dependency(credentials, 'etc')
-            _op.params['configPath'] = 'etc'
+
+    _check_vresion_credentials(credentials, _op, stream.topology)
 
     return _op.outputs[0]
 
@@ -291,25 +291,14 @@ def write(stream, credentials, file=None, fileAttributeName=None, schema=None, t
     Returns:
         Output Stream with schema :py:const:`~streamsx.hdfs.FileInfoSchema`.
     """
-    
     # check bytes_per_file, time_per_file and tuples_per_file parameters
     if (time_per_file is not None and tuples_per_file is not None) or (tuples_per_file is not None and bytes_per_file is not None) or (time_per_file is not None and bytes_per_file is not None):
         raise ValueError("The parameters are mutually exclusive: bytes_per_file, time_per_file, tuples_per_file")
 
     _op = _HDFS2FileSink(stream, file=file, fileAttributeName=fileAttributeName, schema=FileInfoSchema, name=name)
+
+    _check_vresion_credentials(credentials, _op, stream.topology)
     
-    if isinstance(credentials, dict):
-        hdfs_uri, user, password = _read_ae_service_credentials(credentials)
-        _op.params['hdfsUri'] = hdfs_uri
-        _op.params['hdfsUser'] = user
-        _op.params['hdfsPassword'] = password
-    else:
-        if credentials.startswith('{'):
-            _op.params['credentials'] = credentials
-        else:    
-            # expect core-site.xml file in credentials param 
-            stream.topology.add_file_dependency(credentials, 'etc')
-            _op.params['configPath'] = 'etc'
 
     if time_per_file is None and tuples_per_file is None and bytes_per_file is None:
         _op.params['closeOnPunct'] = _op.expression('true')
@@ -343,20 +332,9 @@ def copy(stream, credentials, direction, hdfsFile=None, hdfsFileAttrName=None, l
     Direction=_convert_copy_direction_string_to_enum(direction)
     
     _op = _HDFS2FileCopy(stream, direction=Direction, hdfsFileAttrName=hdfsFileAttrName, localFile=localFile , schema=FileCopySchema, name=name)
-    
-    if isinstance(credentials, dict):
-        hdfs_uri, user, password = _read_ae_service_credentials(credentials)
-        _op.params['hdfsUri'] = hdfs_uri
-        _op.params['hdfsUser'] = user
-        _op.params['hdfsPassword'] = password
-    else:
-        if credentials.startswith('{'):
-            _op.params['credentials'] = credentials
-        else:    
-            # expect core-site.xml file in credentials param 
-            stream.topology.add_file_dependency(credentials, 'etc')
-            _op.params['configPath'] = 'etc'
 
+    _check_vresion_credentials(credentials, _op, stream.topology)
+    
     return _op.outputs[0]
 
 
