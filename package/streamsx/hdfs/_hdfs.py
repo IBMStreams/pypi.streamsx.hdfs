@@ -4,6 +4,8 @@
 
 import datetime
 import json
+import os.path
+from os import path
 from urllib.parse import urlparse
 from enum import Enum
 
@@ -11,6 +13,9 @@ import streamsx.spl.op
 import streamsx.spl.types
 from streamsx.topology.schema import CommonSchema, StreamSchema
 from streamsx.toolkits import download_toolkit
+import streamsx.topology.composite
+
+
 
 
 _TOOLKIT_NAME = 'com.ibm.streamsx.hdfs'
@@ -62,22 +67,64 @@ def _read_service_credentials(credentials):
     hdfs_uri = 'webhdfs://'+uri_parsed.netloc
     return hdfs_uri, user, password
 
-def _check_vresion_credentials(credentials, _op, topology):
-    # check streamsx.hdfs version
-    _add_toolkit_dependency(topology)
+def _check_vresion_credentials1(credentials, _op, topology):
+    if credentials is not None:
+ 
+        # check streamsx.hdfs version
+        _add_toolkit_dependency(topology)
+        #    if credentials is None:
+        #        raise SystemExit("Error: credentials is empty.")
+        print( credentials)
+        print( '--------------------------+++---' + str(credentials))
+        if isinstance(credentials, dict):
+            hdfs_uri, user, password = _read_service_credentials(credentials)
+            _op.params['hdfsUri'] = hdfs_uri
+            _op.params['hdfsUser'] = user
+            _op.params['hdfsPassword'] = password
+        #check if the credentials is a valid JSON string
+        elif _is_a_valid_json(credentials):
+            _op.params['credentials'] = credentials
+        else:    
+            # expect core-site.xml file in credentials param 
+            try:
+                print( '--------------------------*******+++---' + str(credentials))
+          #          with open(str(credentials)):
+                print(credentials)
+                topology.add_file_dependency(credentials, 'etc')
+                _op.params['configPath'] = 'etc'
+                _op.params['credentials'] = None
+            except IOError:
+                raise SystemExit("Error: File not accessible.")
 
-    if isinstance(credentials, dict):
-        hdfs_uri, user, password = _read_service_credentials(credentials)
-        _op.params['hdfsUri'] = hdfs_uri
-        _op.params['hdfsUser'] = user
-        _op.params['hdfsPassword'] = password
-    #check if the credentials is a valid JSON string
-    elif _is_a_valid_json(credentials):
-        _op.params['credentials'] = credentials
-    else:    
-        # expect core-site.xml file in credentials param 
-        topology.add_file_dependency(credentials, 'etc')
-        _op.params['configPath'] = 'etc'
+
+
+def _setCredentials(LocalCredentials, topology):
+    credentials=None
+    hdfsUri=None
+    hdfsUser=None
+    hdfsPassword=None
+    configPath=None
+    if LocalCredentials is not None:
+         print( '-----------  Credentials ------------------ ' + str(LocalCredentials))
+         # check the streamsx.hdfs toolkit version           
+         _add_toolkit_dependency(topology)     
+         
+         if ('xml' in LocalCredentials):
+             try:
+                  with open(LocalCredentials):
+                      topology.add_file_dependency(LocalCredentials, 'etc')
+                      configPath = 'etc'
+                      credentials = None
+             except IOError:
+         #                raise SystemExit("File " + credentials + " not accessible.")     
+                raise ValueError(LocalCredentials)
+         else:
+             hdfsUri, hdfsUser, hdfsPassword = _read_service_credentials(LocalCredentials)
+  
+    return credentials, hdfsUri, hdfsUser, hdfsPassword, configPath
+
+
+
    
 def _check_time_param(time_value, parameter_name):
     if isinstance(time_value, datetime.timedelta):
@@ -192,7 +239,7 @@ def download_toolkit(url=None, target_dir=None):
         streamsx.spl.toolkit.add_toolkit(topology, hdfs_toolkit_location)
 
     Args:
-        url(str): Link to toolkit archive (\*.tgz) to be downloaded. Use this parameter to 
+        url(str): Link to toolkit archive (\*.tgz) to be downloaded. Use this parameter to objectstorage
             download a specific version of the toolkit.
         target_dir(str): the directory where the toolkit is unpacked to. If a relative path is given,
             the path is appended to the system temporary directory, for example to /tmp on Unix/Linux systems.
@@ -226,15 +273,43 @@ def scan(topology, credentials, directory, pattern=None, init_delay=None, name=N
     Returns:
         Output Stream containing file names with schema :py:const:`~streamsx.hdfs.DirectoryScanSchema`.
      """
+    credentials, hdfsUri, hdfsUser, hdfsPassword, configPath = _setCredentials(credentials, topology)
+    _op = _HDFS2DirectoryScan(topology, configPath=configPath, credentials=credentials, hdfsUri=hdfsUri, hdfsUser=hdfsUser,  hdfsPassword=hdfsPassword, directory=directory, pattern=pattern, schema=DirectoryScanSchema, name=name)
 
-    _op = _HDFS2DirectoryScan(topology, directory=directory, pattern=pattern, schema=DirectoryScanSchema, name=name)
-
-    _check_vresion_credentials(credentials, _op, topology)
+ #   _check_vresion_credentials(credentials, _op, topology)
 
     if init_delay is not None:
         _op.params['initDelay'] = streamsx.spl.types.float64(_check_time_param(init_delay, 'init_delay'))
 
     return _op.outputs[0]
+
+def scanComposite(topology, credentials, directory, pattern=None, init_delay=None, name=None):
+    """Scans a Hadoop Distributed File System directory for new or modified files.
+
+    Repeatedly scans a HDFS directory and writes the names of new or modified files that are found in the directory to the output stream.
+
+    Args:
+        topology(Topology): Topology to contain the returned stream.
+        credentials(dict|str|file): The credentials of the IBM cloud Analytics Engine service in *JSON* (idct) or JSON string (str) or the path to the *configuration file* (``hdfs-site.xml`` or ``core-site.xml``). If the *configuration file* is specified, then this file will be copied to the 'etc' directory of the application bundle.     
+        directory(str): The directory to be scanned. Relative path is relative to the '/user/userid/' directory. 
+        pattern(str): Limits the file names that are listed to the names that match the specified regular expression.
+        init_delay(int|float|datetime.timedelta): The time to wait in seconds before the operator scans the directory for the first time. If not set, then the default value is 0.
+        schema(Schema): Optional output stream schema. Default is ``CommonSchema.String``. Alternative a structured streams schema with a single attribute of type ``rstring`` is supported.  
+        name(str): Source name in the Streams context, defaults to a generated name.
+
+    Returns:
+        Output Stream containing file names with schema :py:const:`~streamsx.hdfs.DirectoryScanSchema`.
+     """
+
+    _op = HdfsDirectoryScan(topology, directory=directory, pattern=pattern, schema=DirectoryScanSchema, name=name)
+
+#    _check_vresion_credentials(credentials, _op, topology)
+
+#    if init_delay is not None:
+#        _op.params['initDelay'] = streamsx.spl.types.float64(_check_time_param(init_delay, 'init_delay'))
+
+    return _op.outputs[0]
+
 
 
 def read(stream, credentials, schema=CommonSchema.String, name=None):
@@ -252,18 +327,19 @@ def read(stream, credentials, schema=CommonSchema.String, name=None):
         Output Stream for file content. Default output schema is ``CommonSchema.String`` (line per file).
     """
 
-    _op = _HDFS2FileSource(stream, schema=schema, name=name)
+    credentials, hdfsUri, hdfsUser, hdfsPassword, configPath = _setCredentials(credentials, stream.topology)
+    _op = _HDFS2FileSource(stream, configPath=configPath, credentials=credentials, hdfsUri=hdfsUri, hdfsUser=hdfsUser,  hdfsPassword=hdfsPassword, schema=schema, name=name)
 
-    _check_vresion_credentials(credentials, _op, stream.topology)
+#    _check_vresion_credentials(credentials, _op, stream.topology)
 
     return _op.outputs[0]
 
 
-def write(stream, credentials, file=None, fileAttributeName=None, schema=None, time_per_file=None, tuples_per_file=None, bytes_per_file=None, name=None):
+def write(stream, credentials, file=None, fileAttributeName=None, schema=None, timePerFile=None, tuplesPerFile=None, bytesPerFile=None, name=None):
     """Writes files to a Hadoop Distributed File System.
 
     When writing to a file, that exists already on HDFS with the same name, then this file is overwritten.
-    Per default the file is closed when window punctuation mark is received. Different close modes can be specified with the parameters: ``time_per_file``, ``tuples_per_file``, ``bytes_per_file``
+    Per default the file is closed when window punctuation mark is received. Different close modes can be specified with the parameters: ``timePerFile``, ``tuplesPerFile``, ``bytesPerFile``
 
     Example with input stream of type ``CommonSchema.String``::
 
@@ -283,31 +359,32 @@ def write(stream, credentials, file=None, fileAttributeName=None, schema=None, t
           * %TIME The time when the file is created. The time format is yyyyMMdd_HHmmss.
           
           Important: If the %FILENUM or %TIME specification is not included, the file is overwritten every time a new file is created.
-        time_per_file(int|float|datetime.timedelta): Specifies the approximate time, in seconds, after which the current output file is closed and a new file is opened for writing. The ``bytes_per_file``, ``time_per_file`` and ``tuples_per_file`` parameters are mutually exclusive.
-        tuples_per_file(int): The maximum number of tuples that can be received for each output file. When the specified number of tuples are received, the current output file is closed and a new file is opened for writing. The ``bytes_per_file``, ``time_per_file`` and ``tuples_per_file`` parameters are mutually exclusive. 
-        bytes_per_file(int): Approximate size of the output file, in bytes. When the file size exceeds the specified number of bytes, the current output file is closed and a new file is opened for writing. The ``bytes_per_file``, ``time_per_file`` and ``tuples_per_file`` parameters are mutually exclusive.
+        timePerFile(int|float|datetime.timedelta): Specifies the approximate time, in seconds, after which the current output file is closed and a new file is opened for writing. The ``bytesPerFile``, ``timePerFile`` and ``tuplesPerFile`` parameters are mutually exclusive.
+        tuplesPerFile(int): The maximum number of tuples that can be received for each output file. When the specified number of tuples are received, the current output file is closed and a new file is opened for writing. The ``bytesPerFile``, ``timePerFile`` and ``tuplesPerFile`` parameters are mutually exclusive. 
+        bytesPerFile(int): Approximate size of the output file, in bytes. When the file size exceeds the specified number of bytes, the current output file is closed and a new file is opened for writing. The ``bytesPerFile``, ``timePerFile`` and ``tuplesPerFile`` parameters are mutually exclusive.
         name(str): Sink name in the Streams context, defaults to a generated name.
 
     Returns:
         Output Stream with schema :py:const:`~streamsx.hdfs.FileInfoSchema`.
     """
-    # check bytes_per_file, time_per_file and tuples_per_file parameters
-    if (time_per_file is not None and tuples_per_file is not None) or (tuples_per_file is not None and bytes_per_file is not None) or (time_per_file is not None and bytes_per_file is not None):
-        raise ValueError("The parameters are mutually exclusive: bytes_per_file, time_per_file, tuples_per_file")
+    # check bytesPerFile, timePerFile and tuplesPerFile parameters
+    if (timePerFile is not None and tuplesPerFile is not None) or (tuplesPerFile is not None and bytesPerFile is not None) or (timePerFile is not None and bytesPerFile is not None):
+        raise ValueError("The parameters are mutually exclusive: bytesPerFile, timePerFile, tuplesPerFile")
 
-    _op = _HDFS2FileSink(stream, file=file, fileAttributeName=fileAttributeName, schema=FileInfoSchema, name=name)
+    credentials, hdfsUri, hdfsUser, hdfsPassword, configPath = _setCredentials(credentials, stream.topology)
+    _op = _HDFS2FileSink(stream, configPath=configPath, credentials=credentials, hdfsUri=hdfsUri, hdfsUser=hdfsUser,  hdfsPassword=hdfsPassword, file=file, fileAttributeName=fileAttributeName, schema=FileInfoSchema, name=name)
 
-    _check_vresion_credentials(credentials, _op, stream.topology)
+#    _check_vresion_credentials(credentials, _op, stream.topology)
     
 
-    if time_per_file is None and tuples_per_file is None and bytes_per_file is None:
+    if timePerFile is None and tuplesPerFile is None and bytesPerFile is None:
         _op.params['closeOnPunct'] = _op.expression('true')
-    if time_per_file is not None:
-        _op.params['timePerFile'] = streamsx.spl.types.float64(_check_time_param(time_per_file, 'time_per_file'))
-    if tuples_per_file is not None:
-        _op.params['tuplesPerFile'] = streamsx.spl.types.int64(tuples_per_file)
-    if bytes_per_file is not None:
-        _op.params['bytesPerFile'] = streamsx.spl.types.int64(bytes_per_file)
+    if timePerFile is not None:
+        _op.params['timePerFile'] = streamsx.spl.types.float64(_check_time_param(timePerFile, 'timePerFile'))
+    if tuplesPerFile is not None:
+        _op.params['tuplesPerFile'] = streamsx.spl.types.int64(tuplesPerFile)
+    if bytesPerFile is not None:
+        _op.params['bytesPerFile'] = streamsx.spl.types.int64(bytesPerFile)
     return _op.outputs[0]
 
 
@@ -331,9 +408,10 @@ def copy(stream, credentials, direction, hdfsFile=None, hdfsFileAttrName=None, l
 
     Direction=_convert_copy_direction_string_to_enum(direction)
     
-    _op = _HDFS2FileCopy(stream, direction=Direction, hdfsFileAttrName=hdfsFileAttrName, localFile=localFile , schema=FileCopySchema, name=name)
+    credentials, hdfsUri, hdfsUser, hdfsPassword, configPath = _setCredentials(credentials, stream.topology)
+    _op = _HDFS2FileCopy(stream, configPath=configPath, credentials=credentials, hdfsUri=hdfsUri, hdfsUser=hdfsUser,  hdfsPassword=hdfsPassword, direction=Direction, hdfsFileAttrName=hdfsFileAttrName, localFile=localFile , schema=FileCopySchema, name=name)
 
-    _check_vresion_credentials(credentials, _op, stream.topology)
+#    _check_vresion_credentials(credentials, _op, stream.topology)
     
     return _op.outputs[0]
 
@@ -574,5 +652,1192 @@ class _HDFS2FileCopy(streamsx.spl.op.Invoke):
 
         super(_HDFS2FileCopy, self).__init__(topology,kind,inputs,schema,params,name)
 
+class HdfsDirectoryScan(streamsx.topology.composite.Source):
+    """
+    Watches a HDFS directory, and generates file names on the output, one for each file that is found in the directory.
+
+    Example, scanning for files in testDir directory::
+
+        import streamsx.standard.files as files
+        from streamsx.topology.topology import Topology
+
+        dir = '/user/streamsadmin/testDir'
+        config = {
+            'configPath' : 'usr/hdp/hadoop/conf',
+            'initDelay': 2.0,
+            'sleepTime' : 2.0,
+            'pattern' : 'sample.*txt'
+        }       
+
+        s = topo.source(hdfs.DirectoryScan(directory=dir, **config))
+
+    Example, scanning for files with "csv" file extension::
+
+        s = topo.source(hdfs.HdfsDirectoryScan(directory='/user/streamsadmin/testDir', pattern='.*\.csv$'))
+
+    Attributes
+    ----------
+    directory : str|Expression
+        Specifies the name of the directory to be scanned
+    pattern : str
+        Instructs the operator to ignore file names that do not match the regular expression pattern
+    schema : StreamSchema
+        Output schema, defaults to CommonSchema.String
+    options : kwargs
+        The additional optional parameters as variable keyword arguments.
+    """
 
 
+    def __init__(self, credentials, directory, pattern=None, initDelay=None, schema=CommonSchema.String, **options):
+        self.appConfigName = None
+        self.localCredentials = credentials
+        self.credentials = None
+        self.directory = directory
+        self.schema = schema
+        self.pattern = pattern
+        self.sleepTime = None
+        self.initDelay = initDelay
+        self.authKeytab = None
+        self.credFile = None
+        self.hdfsPassword = None
+        self.hdfsUser = None
+        self.keyStorePassword = None
+        self.keyStorePath = None
+        self.libPath = None
+        self.policyFilePath = None
+        self.reconnectionBound = None
+        self.hdfsUri = None
+        self.reconnectionInterval = None
+        self.reconnectionPolicy = None
+        self.strictMode = None
+        self.vmArg = None
+        self.configPath = None
+        self.ignore_existing_files_at_startup = None
+  
+
+        if 'appConfigName' in options:
+            self.appConfigName = options.get('appConfigName')
+        if 'hdfsUser' in options:
+            self.hdfsUser = options.get('hdfsUser')
+        if 'hdfsUri' in options:
+            self.hdfsUri = options.get('hdfsUri')
+        if 'hdfsPassword' in options:
+            self.hdfsPassword = options.get('hdfsPassword')
+        if 'sleepTime' in options:
+            self.sleepTime = options.get('sleepTime')
+        if 'initDelay' in options:
+            self.initDelay = options.get('initDelay')
+        if 'authKeytab' in options:
+            self.authKeytab = options.get('authKeytab')
+        if 'authPrincipal' in options:
+            self.authPrincipal = options.get('authPrincipal')
+        if 'configPath' in options:
+            self.configPath = options.get('configPath')
+        if 'configPath' in options:
+            self.configPath = options.get('configPath')
+        if 'strictMode' in options:
+            self.strictMode = options.get('strictMode')
+  
+
+
+    @property
+    def appConfigName(self):
+        """
+            str: The optional parameter appConfigName specifies the name of the application configuration that contains HDFS connection related configuration parameter credentials..
+        """
+        return self._appConfigName
+
+    @appConfigName.setter
+    def appConfigName(self, value):
+        self._appConfigName = value
+
+    @property
+    def authKeytab(self):
+        """
+            str: The optional parameter authKeytab specifies the file that contains the encrypted keys for the user that is specified by the authPrincipal parameter. The operator uses this keytab file to authenticate the user. The keytab file is generated by the administrator. You must specify this parameter to use Kerberos authentication.
+        """
+        return self._authKeytab
+
+    @authKeytab.setter
+    def authKeytab(self, value):
+        self._authKeytab = value
+
+    @property
+    def authPrincipal(self):
+        """
+            str: The optional parameter authPrincipal specifies the Kerberos principal that you use for authentication. This value is set to the principal that is created for the IBM Streams instance owner. You must specify this parameter if you want to use Kerberos authentication. 
+        """
+        return self._authKeytab
+
+    @authPrincipal.setter
+    def authPrincipal(self, value):
+        self._authPrincipal = value
+     
+
+    @property
+    def configPath(self):
+        """
+            str: The optional parameter configPath specifies the path to the directory that contains the HDFS configuration file core-site.xml .
+        """
+        return self._configPath
+
+    @configPath.setter
+    def configPath(self, value):
+        self._configPath = value
+
+    @property
+    def credFile(self):
+        """
+            str: The optional parameter credFile specifies a file that contains login credentials. The credentials are used to connect to WEBHDF remotely by using the schema: webhdfs://hdfshost:webhdfsport The credentials file must be a valid JSON string and must contain the hdfs credentials key/value pairs for user, password and webhdfs in JSON format. 
+        """
+        return self._credFile
+
+    @credFile.setter
+    def credFile(self, value):
+        self._credFile = value
+
+    @property
+    def credentials(self):
+        """
+            str: The optional parameter credentials specifies the JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
+        """
+        return self._credentials
+
+    @credentials.setter
+    def credentials(self, value):
+        self._credentials = value
+
+    @property
+    def hdfsPassword(self):
+        """
+            str: The parameter hdfsPassword specifies the password to use when you connecting to a Hadoop instance via WEBHDFS.
+        """
+        return self._hdfsPassword
+
+    @hdfsPassword.setter
+    def hdfsPassword(self, value):
+        self._hdfsPassword = value
+
+    @property
+    def hdfsUri(self):
+        """
+            str: The parameter hdfsUri specifies the uniform resource identifier (URI) that you can use to connect to the HDFS file system. 
+        """
+        return self._hdfsUri
+
+    @hdfsUri.setter
+    def hdfsUri(self, value):
+        self._hdfsUri = value
+
+
+    @property
+    def hdfsUser(self):
+        """
+            str: The parameter hdfsUser specifies the user ID to use when you connect to the HDFS file system. If this parameter is not specified, the operator uses the instance owner ID to connect to HDFS. .
+        """
+        return self._hdfsUser
+
+    @hdfsUser.setter
+    def hdfsUser(self, value):
+        self._hdfsUser = value
+
+
+    @property
+    def initDelay(self):
+        """
+            float: The parameter initDelay specifies the time to wait in seconds before the operator HDFS2DirectoryScan reads the first file. The default value is 0 . 
+        """
+        return self._initDelay
+
+    @initDelay.setter
+    def initDelay(self, value):
+        self._initDelay = value
+
+
+    @property
+    def keyStorePassword(self):
+        """
+            str: The optional parameter keyStorePassword is only supported when connecting to a WEBHDFS. It specifies the password for the keystore file. 
+        """
+        return self._keyStorePassword
+
+    @keyStorePassword.setter
+    def keyStorePassword(self, value):
+        self._keyStorePassword = value
+
+    @property
+    def keyStorePath(self):
+        """
+            str: The optional parameter keyStorePath is only supported when connecting to a WEBHDFS. It specifies the path to the keystore file, which is in PEM format. The keystore file is used when making a secure connection to the HDFS server and must contain the public certificate of the HDFS server that will be connected to. 
+        """
+        return self._keyStorePath
+    
+    @keyStorePath.setter
+    def keyStorePath(self, value):
+        self._keyStorePath = value
+
+
+    @property
+    def libPath(self):
+        """
+            str: The optional parameter libPath specifies the absolute path to the directory that contains the Hadoop library files.
+        """
+        return self._libPath
+
+  
+    @libPath.setter
+    def libPath(self, value):
+        self._libPath = value
+
+    @property
+    def pattern(self):
+        """
+            str: The optional parameter pattern limits the file names that are listed to the names that match the specified regular expression. The HDFS2DirectoryScan operator ignores file names that do not match the specified regular expression. 
+        """
+        return self._pattern
+
+
+    @pattern.setter
+    def pattern(self, value):
+        self._pattern = value
+
+    @property
+    def policyFilePath(self):
+        """
+            str: The optional parameter policyFilePath is relevant when connecting to IBM Analytics Engine on IBM Cloud. It specifies the path to the directory that contains the Java Cryptography Extension policy files (US_export_policy.jar and local_policy.jar).
+        """
+        return self._policyFilePath
+
+
+    @policyFilePath.setter
+    def policyFilePath(self, value):
+        self._policyFilePath = value
+
+    @property
+    def reconnectionBound(self):
+        """
+            int: The optional parameter reconnectionBound specifies the number of successive connection attempts that occur when a connection fails or a disconnect occurs. It is used only when the reconnectionPolicy parameter is set to BoundedRetry; otherwise, it is ignored. The default value is 5 .
+        """
+        return self._reconnectionBound
+
+    @reconnectionBound.setter
+    def reconnectionBound(self, value):
+        self._reconnectionBound = value
+
+
+
+    @property
+    def reconnectionInterval(self):
+        """
+            int: The optional parameter reconnectionInterval specifies the amount of time (in seconds) that the operator waits between successive connection attempts. It is used only when the reconnectionPolicy parameter is set to BoundedRetry or InfiniteRetry; othewise, it is ignored. The default value is 10 . 
+        """
+        return self._reconnectionInterval
+
+    @reconnectionInterval.setter
+    def reconnectionInterval(self, value):
+        self._reconnectionInterval = value
+
+
+    @property
+    def reconnectionPolicy(self):
+        """
+            str: The optional parameter reconnectionPolicy specifies the policy that is used by the operator to handle HDFS connection failures. The valid values are: NoRetry, InfiniteRetry , and BoundedRetry . The default value is BoundedRetry .
+        """
+        return self._reconnectionPolicy
+
+    @reconnectionPolicy.setter
+    def reconnectionPolicy(self, value):
+        self._reconnectionPolicy = value
+
+
+    @property
+    def sleepTime(self):
+        """
+            float: The parameter sleepTime specifies the minimum time between directory scans. The default value is 5.0 seconds.  . 
+        """
+        return self._sleepTime
+
+    @sleepTime.setter
+    def sleepTime(self, value):
+        self._sleepTime = value
+
+
+    @property
+    def strictMode(self):
+        """
+            bool: The parameter sleepTime specifies the minimum time between directory scans. The default value is 5.0 seconds.
+        """
+        return self._strictMode
+
+    @strictMode.setter
+    def strictMode(self, value):
+        self._strictMode = value
+
+    @property
+    def vmArg(self):
+        """
+            str: The optional parameter vmArg parameter to specify additional JVM arguments that are required by the specific invocation of the operator. 
+        """
+        return self._vmArg
+
+    @vmArg.setter
+    def vmArg(self, value):
+        self._vmArg = value
+
+
+    def populate(self, topology, name, **options):
+
+        self.credentials, self.hdfsUri, self.hdfsUser, self.hdfsPassword, self.configPath=_setCredentials(self.localCredentials, topology)
+  
+        if self.sleepTime is not None:
+            self.sleepTime = streamsx.spl.types.float64(self.sleepTime)
+        if self.initDelay is not None:
+            self.initDelay = streamsx.spl.types.float64(self.initDelay)
+        if self.strictMode is not None:
+            if self.strictMode is True:
+                self.strictMode = streamsx.spl.op.Expression.expression('true')
+        if self.authKeytab is not None:
+            self.authKeytab = streamsx.spl.op.Expression.expression(self.authKeytab)
+            
+        _op = _HDFS2DirectoryScan(topology=topology, \
+                        schema=self.schema, \
+                        appConfigName=self.appConfigName, \
+                        authKeytab=self.authKeytab, \
+                        authPrincipal=self.authPrincipal, \
+                        configPath=self.configPath, \
+                        credFile=self.credFile, \
+                        credentials=self.credentials, \
+                        directory=self.directory, \
+                        hdfsPassword=self.hdfsPassword, \
+                        hdfsUri=self.hdfsUri, \
+                        hdfsUser=self.hdfsUser, \
+                        initDelay=self.initDelay, \
+                        keyStorePassword=self.keyStorePassword, \
+                        keyStorePath=self.keyStorePath, \
+                        libPath=self.libPath, \
+                        pattern=self.pattern, \
+                        policyFilePath=self.policyFilePath, \
+                        reconnectionBound=self.reconnectionBound, \
+                        reconnectionInterval=self.reconnectionInterval, \
+                        reconnectionPolicy=self.reconnectionPolicy, \
+                        sleepTime=self.sleepTime, \
+                        strictMode=self.strictMode, \
+                        vmArg=self.vmArg, \
+                        name=name)
+
+        return _op.stream
+
+
+class HdfsFileSink(streamsx.topology.composite.ForEach):
+    """
+    Write a stream to a file
+
+    .. note:: Only the last component of the path name is created if it does not exist. All directories in the path name up to the last component must exist.
+
+    Example for writing a stream to a file::
+
+        import streamsx.standard.files as files
+        from streamsx.topology.topology import Topology
+
+        topo = Topology()
+        s = topo.source(['Hello', 'World!']).as_string()
+        s.for_each(files.FileSink(file='/tmp/data.txt'))
+
+    Example with specifying parameters as kwargs and construct the name of the file with the attribute ``filename`` of the input stream::
+
+        config = {
+            'format': Format.txt.name,
+            'tuplesPerFile': 50000,
+            'close_mode': CloseMode.count.name,
+            'write_punctuations': True,
+            'suppress': 'filename'
+        }
+        fsink = files.FileSink(file=streamsx.spl.op.Expression.expression('"/tmp/"+'+'filename'), **config)
+        to_file.for_each(fsink)
+
+    .. versionadded:: 0.5
+
+    Attributes
+    ----------
+    file : str
+        Name of the output file.
+    options : kwargs
+        The additional optional parameters as variable keyword arguments.
+    """
+
+
+    def __init__(self, credentials, file, **options):
+        self.file = file
+        self.localCredentials = credentials
+        self.appConfigName = None
+        self.authKeytab = None
+        self.authPrincipal = None
+        self.bytesPerFile = None
+        self.closeOnPunct = None
+        self.configPath = None
+        self.credFile = None
+        self.credentials = None
+        self.encoding = None
+        self.fileAttributeName = None
+        self.schema = None
+        self.hdfsPassword = None
+        self.hdfsUri = None
+        self.hdfsUser = None
+        self.keyStorePassword = None
+        self.keyStorePath = None
+        self.libPath = None
+        self.policyFilePath = None
+        self.reconnectionBound = None
+        self.reconnectionInterval = None
+        self.reconnectionPolicy = None
+        self.tempFile = None
+        self.timeFormat = None
+        self.timePerFile = None
+        self.tuplesPerFile = None
+        self.vmArg = None
+        
+        
+        if 'appConfigName' in options:
+            self.appConfigName = options.get('appConfigName')
+        if 'hdfsUser' in options:
+            self.hdfsUser = options.get('hdfsUser')
+        if 'hdfsUri' in options:
+            self.hdfsUri = options.get('hdfsUri')
+        if 'hdfsPassword' in options:
+            self.hdfsPassword = options.get('hdfsPassword')
+        if 'sleepTime' in options:
+            self.sleepTime = options.get('sleepTime')
+        if 'initDelay' in options:
+            self.initDelay = options.get('initDelay')
+        if 'authKeytab' in options:
+            self.authKeytab = options.get('authKeytab')
+        if 'authPrincipal' in options:
+            self.authPrincipal = options.get('authPrincipal')
+        if 'configPath' in options:
+            self.configPath = options.get('configPath')
+        if 'configPath' in options:
+            self.configPath = options.get('configPath')
+ 
+    @property
+    def appConfigName(self):
+        """
+            str: The optional parameter appConfigName specifies the name of the application configuration that contains HDFS connection related configuration parameter credentials..
+        """
+        return self._appConfigName
+
+    @appConfigName.setter
+    def appConfigName(self, value):
+        self._appConfigName = value
+
+    @property
+    def authKeytab(self):
+        """
+            str: The optional parameter authKeytab specifies the file that contains the encrypted keys for the user that is specified by the authPrincipal parameter. The operator uses this keytab file to authenticate the user. The keytab file is generated by the administrator. You must specify this parameter to use Kerberos authentication.
+        """
+        return self._authKeytab
+
+    @authKeytab.setter
+    def authKeytab(self, value):
+        self._authKeytab = value
+
+    @property
+    def authPrincipal(self):
+        """
+            str: The optional parameter authPrincipal specifies the Kerberos principal that you use for authentication. This value is set to the principal that is created for the IBM Streams instance owner. You must specify this parameter if you want to use Kerberos authentication. 
+        """
+        return self._authKeytab
+
+    @authPrincipal.setter
+    def authPrincipal(self, value):
+        self._authPrincipal = value
+     
+
+    @property
+    def configPath(self):
+        """
+            str: The optional parameter configPath specifies the path to the directory that contains the HDFS configuration file core-site.xml .
+        """
+        return self._configPath
+
+    @configPath.setter
+    def configPath(self, value):
+        self._configPath = value
+
+    @property
+    def credFile(self):
+        """
+            str: The optional parameter credFile specifies a file that contains login credentials. The credentials are used to connect to WEBHDF remotely by using the schema: webhdfs://hdfshost:webhdfsport The credentials file must be a valid JSON string and must contain the hdfs credentials key/value pairs for user, password and webhdfs in JSON format. 
+        """
+        return self._credFile
+
+    @credFile.setter
+    def credFile(self, value):
+        self._credFile = value
+
+    @property
+    def credentials(self):
+        """
+            str: The optional parameter credentials specifies the JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
+        """
+        return self._credentials
+
+    @credentials.setter
+    def credentials(self, value):
+        self._credentials = value
+
+    @property
+    def fileAttributeName(self):
+        """
+            str: The optional parameter fileAttributeName specifies the JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
+        """
+        return self._fileAttributeName
+
+    @fileAttributeName.setter
+    def fileAttributeName(self, value):
+        self._fileAttributeName = value
+
+
+
+    @property
+    def hdfsPassword(self):
+        """
+            str: The parameter hdfsPassword specifies the password to use when you connecting to a Hadoop instance via WEBHDFS.
+        """
+        return self._hdfsPassword
+
+    @hdfsPassword.setter
+    def hdfsPassword(self, value):
+        self._hdfsPassword = value
+
+    @property
+    def hdfsUri(self):
+        """
+            str: The parameter hdfsUri specifies the uniform resource identifier (URI) that you can use to connect to the HDFS file system. 
+        """
+        return self._hdfsUri
+
+    @hdfsUri.setter
+    def hdfsUri(self, value):
+        self._hdfsUri = value
+
+
+    @property
+    def hdfsUser(self):
+        """
+            str: The parameter hdfsUser specifies the user ID to use when you connect to the HDFS file system. If this parameter is not specified, the operator uses the instance owner ID to connect to HDFS. .
+        """
+        return self._hdfsUser
+
+    @hdfsUser.setter
+    def hdfsUser(self, value):
+        self._hdfsUser = value
+
+
+    @property
+    def initDelay(self):
+        """
+            float: The parameter initDelay specifies the time to wait in seconds before the operator HDFS2DirectoryScan reads the first file. The default value is 0 . 
+        """
+        return self._initDelay
+
+    @initDelay.setter
+    def initDelay(self, value):
+        self._initDelay = value
+
+
+    @property
+    def keyStorePassword(self):
+        """
+            str: The optional parameter keyStorePassword is only supported when connecting to a WEBHDFS. It specifies the password for the keystore file. 
+        """
+        return self._keyStorePassword
+
+    @keyStorePassword.setter
+    def keyStorePassword(self, value):
+        self._keyStorePassword = value
+
+    @property
+    def keyStorePath(self):
+        """
+            str: The optional parameter keyStorePath is only supported when connecting to a WEBHDFS. It specifies the path to the keystore file, which is in PEM format. The keystore file is used when making a secure connection to the HDFS server and must contain the public certificate of the HDFS server that will be connected to. 
+        """
+        return self._keyStorePath
+    
+    @keyStorePath.setter
+    def keyStorePath(self, value):
+        self._keyStorePath = value
+
+
+    @property
+    def libPath(self):
+        """
+            str: The optional parameter libPath specifies the absolute path to the directory that contains the Hadoop library files.
+        """
+        return self._libPath
+
+  
+    @libPath.setter
+    def libPath(self, value):
+        self._libPath = value
+
+    @property
+    def policyFilePath(self):
+        """
+            str: The optional parameter policyFilePath is relevant when connecting to IBM Analytics Engine on IBM Cloud. It specifies the path to the directory that contains the Java Cryptography Extension policy files (US_export_policy.jar and local_policy.jar).
+        """
+        return self._policyFilePath
+
+
+    @policyFilePath.setter
+    def policyFilePath(self, value):
+        self._policyFilePath = value
+
+    @property
+    def reconnectionBound(self):
+        """
+            int: The optional parameter reconnectionBound specifies the number of successive connection attempts that occur when a connection fails or a disconnect occurs. It is used only when the reconnectionPolicy parameter is set to BoundedRetry; otherwise, it is ignored. The default value is 5 .
+        """
+        return self._reconnectionBound
+
+    @reconnectionBound.setter
+    def reconnectionBound(self, value):
+        self._reconnectionBound = value
+
+
+
+    @property
+    def reconnectionInterval(self):
+        """
+            int: The optional parameter reconnectionInterval specifies the amount of time (in seconds) that the operator waits between successive connection attempts. It is used only when the reconnectionPolicy parameter is set to BoundedRetry or InfiniteRetry; othewise, it is ignored. The default value is 10 . 
+        """
+        return self._reconnectionInterval
+
+    @reconnectionInterval.setter
+    def reconnectionInterval(self, value):
+        self._reconnectionInterval = value
+
+
+    @property
+    def reconnectionPolicy(self):
+        """
+            str: The optional parameter reconnectionPolicy specifies the policy that is used by the operator to handle HDFS connection failures. The valid values are: NoRetry, InfiniteRetry , and BoundedRetry . The default value is BoundedRetry .
+        """
+        return self._reconnectionPolicy
+
+    @reconnectionPolicy.setter
+    def reconnectionPolicy(self, value):
+        self._reconnectionPolicy = value
+
+
+    @property
+    def sleepTime(self):
+        """
+            float: The parameter sleepTime specifies the minimum time between directory scans. The default value is 5.0 seconds.  . 
+        """
+        return self._sleepTime
+
+    @sleepTime.setter
+    def sleepTime(self, value):
+        self._sleepTime = value
+
+
+    @property
+    def vmArg(self):
+        """
+            str: The optional parameter vmArg parameter to specify additional JVM arguments that are required by the specific invocation of the operator. 
+        """
+        return self._vmArg
+
+    @vmArg.setter
+    def vmArg(self, value):
+        self._vmArg = value
+
+  
+
+
+    @property
+    def bytesPerFile(self):
+        """
+            int: Specifies the approximate size of the output file, in bytes. When the file size exceeds the specified number of bytes, the current output file is closed and a new file is opened. This parameter must be specified when the :py:meth:`~streamsx.standard.files.FileSink.close_mode` parameter is set to size.
+        """
+        return self._bytesPerFile
+
+    @bytesPerFile.setter
+    def bytesPerFile(self, value):
+        self._bytesPerFile = value
+
+
+    @property
+    def encoding(self):
+        """
+             str: Specifies the character set encoding that is used in the output file. Data that is written to the output file is converted from the UTF-8 character set to the specified character set before any compression is performed. The encoding parameter is not valid with formats bin or block.
+        """
+        return self._encoding
+
+    @encoding.setter
+    def encoding(self, value):
+        self._encoding = value
+
+
+
+    @property
+    def timePerFile(self):
+        """
+            float: Specifies the approximate time, in seconds, after which the current output file is closed and a new file is opened. If the :py:meth:`~streamsx.standard.files.FileSink.close_mode` parameter is set to time, this parameter must be specified.
+        """
+        return self._timePerFile
+
+    @timePerFile.setter
+    def timePerFile(self, value):
+        self._timePerFile = value
+
+
+    @property
+    def tuplesPerFile(self):
+        """
+            int: Specifies the maximum number of tuples that can be received for each output file. When the specified number of tuples are received, the current output file is closed and a new file is opened for writing. This parameter must be specified when the :py:meth:`~streamsx.standard.files.FileSink.close_mode` parameter is set to count.
+        """
+        return self._tuplesPerFile
+
+    @tuplesPerFile.setter
+    def tuplesPerFile(self, value):
+        self._tuplesPerFile = value
+
+
+    def populate(self, topology, stream, name, **options) -> streamsx.topology.topology.Sink:
+
+        """     
+        _add_toolkit_dependency(topology)
+        if self.credentials is not None:
+            if not (_is_a_valid_json(self.credentials)):               
+                try:
+                    with open(self.credentials):
+                        print(self.credentials)
+                        topology.add_file_dependency(self.credentials, 'etc')
+                        self.configPath = 'etc'
+                        self.credentials = None
+                except IOError:
+                    raise SystemExit("File " + self.credentials + " not accessible.")
+        """           
+  
+    
+        self.credentials, self.hdfsUri, self.hdfsUser, self.hdfsPassword, self.configPath=_setCredentials(self.localCredentials, topology)
+       
+        if self.bytesPerFile is not None:
+            self.bytesPerFile = streamsx.spl.types.uint32(self.bytesPerFile)
+        if self.timePerFile is not None:
+            self.timePerFile = streamsx.spl.types.float64(self.timePerFile)
+        if self.tuplesPerFile is not None:
+            self.tuplesPerFile = streamsx.spl.types.uint32(self.tuplesPerFile)
+
+
+        _op = _HDFS2FileSink(stream=stream, \
+                        appConfigName=self.appConfigName, \
+                        authKeytab=self.authKeytab, \
+                        authPrincipal=self.authPrincipal, \
+                        bytesPerFile=self.bytesPerFile, \
+                        closeOnPunct=self.closeOnPunct, \
+                        configPath=self.configPath, \
+                        credFile=self.credFile, \
+                        credentials=self.credentials, \
+                        encoding=self.encoding, \
+                        file=self.file, \
+                        fileAttributeName=self.fileAttributeName, \
+                        hdfsPassword=self.hdfsPassword, \
+                        hdfsUri=self.hdfsUri, \
+                        hdfsUser=self.hdfsUser, \
+                        keyStorePassword=self.keyStorePassword, \
+                        keyStorePath=self.keyStorePath, \
+                        libPath=self.libPath, \
+                        policyFilePath=self.policyFilePath, \
+                        reconnectionBound=self.reconnectionBound, \
+                        reconnectionInterval=self.reconnectionInterval, \
+                        reconnectionPolicy=self.reconnectionPolicy, \
+                        tempFile=self.tempFile, \
+                        timeFormat=self.timeFormat, \
+                        timePerFile=self.timePerFile, \
+                        tuplesPerFile=self.tuplesPerFile, \
+                        vmArg=self.vmArg, \
+                        name=name)
+
+        return streamsx.topology.topology.Sink(_op)
+
+class HdfsFileSource(streamsx.topology.composite.Map):
+    """
+    Watches a HDFS directory, and generates file names on the output, one for each file that is found in the directory.
+
+    Example, scanning for files in testDir directory::
+
+        import streamsx.standard.files as files
+        from streamsx.topology.topology import Topology
+
+        dir = '/user/streamsadmin/testDir'
+        config = {
+            'configPath' : 'usr/hdp/hadoop/conf',
+            'initDelay': 2.0,
+            'sleepTime' : 2.0,
+            'pattern' : 'sample.*txt'
+        }       
+
+        s = topo.source(hdfs.DirectoryScan(directory=dir, **config))
+
+    Example, scanning for files with "csv" file extension::
+
+        s = topo.source(hdfs.HdfsDirectoryScan(directory='/user/streamsadmin/testDir', pattern='.*\.csv$'))
+
+    Attributes
+    ----------
+    directory : str|Expression
+        Specifies the name of the directory to be scanned
+    pattern : str
+        Instructs the operator to ignore file names that do not match the regular expression pattern
+    schema : StreamSchema
+        Output schema, defaults to CommonSchema.String
+    options : kwargs
+        The additional optional parameters as variable keyword arguments.
+    """
+
+
+    def __init__(self, credentials, schema=CommonSchema.String, **options):
+#        self.stream = None
+        self.appConfigName = None
+        self.authKeytab = None
+        self.authPrincipal = None
+        self.blockSize = None        
+        self.encoding = None        
+        self.localCredentials = credentials
+        self.credentials = None
+        self.configPath = None
+        self.file = None
+        self.schema = schema
+        self.credFile = None
+        self.hdfsPassword = None
+        self.hdfsUri = None
+        self.hdfsUser = None
+        self.initDelay = None
+        self.keyStorePassword = None
+        self.keyStorePath = None
+        self.libPath = None
+        self.policyFilePath = None
+        self.reconnectionBound = None
+        self.reconnectionInterval = None
+        self.reconnectionPolicy = None
+        self.vmArg = None
+        self.ignore_existing_files_at_startup = None
+  
+
+        if 'appConfigName' in options:
+            self.appConfigName = options.get('appConfigName')
+        if 'hdfsUser' in options:
+            self.hdfsUser = options.get('hdfsUser')
+        if 'hdfsUri' in options:
+            self.hdfsUri = options.get('hdfsUri')
+        if 'hdfsPassword' in options:
+            self.hdfsPassword = options.get('hdfsPassword')
+        if 'initDelay' in options:
+            self.initDelay = options.get('initDelay')
+        if 'authKeytab' in options:
+            self.authKeytab = options.get('authKeytab')
+        if 'authPrincipal' in options:
+            self.authPrincipal = options.get('authPrincipal')
+        if 'configPath' in options:
+            self.configPath = options.get('configPath')
+        if 'configPath' in options:
+            self.configPath = options.get('configPath')
+  
+
+
+    @property
+    def appConfigName(self):
+        """
+            str: The optional parameter appConfigName specifies the name of the application configuration that contains HDFS connection related configuration parameter credentials..
+        """
+        return self._appConfigName
+
+    @appConfigName.setter
+    def appConfigName(self, value):
+        self._appConfigName = value
+
+    @property
+    def authKeytab(self):
+        """
+            str: The optional parameter authKeytab specifies the file that contains the encrypted keys for the user that is specified by the authPrincipal parameter. The operator uses this keytab file to authenticate the user. The keytab file is generated by the administrator. You must specify this parameter to use Kerberos authentication.
+        """
+        return self._authKeytab
+
+    @authKeytab.setter
+    def authKeytab(self, value):
+        self._authKeytab = value
+
+    @property
+    def authPrincipal(self):
+        """
+            str: The optional parameter authPrincipal specifies the Kerberos principal that you use for authentication. This value is set to the principal that is created for the IBM Streams instance owner. You must specify this parameter if you want to use Kerberos authentication. 
+        """
+        return self._authKeytab
+
+    @authPrincipal.setter
+    def authPrincipal(self, value):
+        self._authPrincipal = value
+     
+
+    @property
+    def configPath(self):
+        """
+            str: The optional parameter configPath specifies the path to the directory that contains the HDFS configuration file core-site.xml .
+        """
+        return self._configPath
+
+    @configPath.setter
+    def configPath(self, value):
+        self._configPath = value
+
+    @property
+    def credFile(self):
+        """
+            str: The optional parameter credFile specifies a file that contains login credentials. The credentials are used to connect to WEBHDF remotely by using the schema: webhdfs://hdfshost:webhdfsport The credentials file must be a valid JSON string and must contain the hdfs credentials key/value pairs for user, password and webhdfs in JSON format. 
+        """
+        return self._credFile
+
+    @credFile.setter
+    def credFile(self, value):
+        self._credFile = value
+
+    @property
+    def credentials(self):
+        """
+            str: The optional parameter credentials specifies the JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
+        """
+        return self._credentials
+
+    @credentials.setter
+    def credentials(self, value):
+        self._credentials = value
+
+    @property
+    def encoding(self):
+        """
+            str: The optional parameter encoding specifies the JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
+        """
+        return self._encoding
+
+    @encoding.setter
+    def encoding(self, value):
+        self._encoding = value
+
+
+    @property
+    def file(self):
+        """
+            str: The optional parameter credentials specifies the JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
+        """
+        return self._file
+
+    @file.setter
+    def file(self, value):
+        self._file = value
+
+
+    @property
+    def hdfsPassword(self):
+        """
+            str: The parameter hdfsPassword specifies the password to use when you connecting to a Hadoop instance via WEBHDFS.
+        """
+        return self._hdfsPassword
+
+    @hdfsPassword.setter
+    def hdfsPassword(self, value):
+        self._hdfsPassword = value
+
+    @property
+    def hdfsUri(self):
+        """
+            str: The parameter hdfsUri specifies the uniform resource identifier (URI) that you can use to connect to the HDFS file system. 
+        """
+        return self._hdfsUri
+
+    @hdfsUri.setter
+    def hdfsUri(self, value):
+        self._hdfsUri = value
+
+
+    @property
+    def hdfsUser(self):
+        """
+            str: The parameter hdfsUser specifies the user ID to use when you connect to the HDFS file system. If this parameter is not specified, the operator uses the instance owner ID to connect to HDFS. .
+        """
+        return self._hdfsUser
+
+    @hdfsUser.setter
+    def hdfsUser(self, value):
+        self._hdfsUser = value
+
+
+    @property
+    def initDelay(self):
+        """
+            float: The parameter initDelay specifies the time to wait in seconds before the operator HDFS2DirectoryScan reads the first file. The default value is 0 . 
+        """
+        return self._initDelay
+
+    @initDelay.setter
+    def initDelay(self, value):
+        self._initDelay = value
+
+
+    @property
+    def keyStorePassword(self):
+        """
+            str: The optional parameter keyStorePassword is only supported when connecting to a WEBHDFS. It specifies the password for the keystore file. 
+        """
+        return self._keyStorePassword
+
+    @keyStorePassword.setter
+    def keyStorePassword(self, value):
+        self._keyStorePassword = value
+
+    @property
+    def keyStorePath(self):
+        """
+            str: The optional parameter keyStorePath is only supported when connecting to a WEBHDFS. It specifies the path to the keystore file, which is in PEM format. The keystore file is used when making a secure connection to the HDFS server and must contain the public certificate of the HDFS server that will be connected to. 
+        """
+        return self._keyStorePath
+    
+    @keyStorePath.setter
+    def keyStorePath(self, value):
+        self._keyStorePath = value
+
+
+    @property
+    def libPath(self):
+        """
+            str: The optional parameter libPath specifies the absolute path to the directory that contains the Hadoop library files.
+        """
+        return self._libPath
+
+  
+    @libPath.setter
+    def libPath(self, value):
+        self._libPath = value
+
+    @property
+    def pattern(self):
+        """
+            str: The optional parameter pattern limits the file names that are listed to the names that match the specified regular expression. The HDFS2DirectoryScan operator ignores file names that do not match the specified regular expression. 
+        """
+        return self._pattern
+
+
+    @pattern.setter
+    def pattern(self, value):
+        self._pattern = value
+
+    @property
+    def policyFilePath(self):
+        """
+            str: The optional parameter policyFilePath is relevant when connecting to IBM Analytics Engine on IBM Cloud. It specifies the path to the directory that contains the Java Cryptography Extension policy files (US_export_policy.jar and local_policy.jar).
+        """
+        return self._policyFilePath
+
+
+    @policyFilePath.setter
+    def policyFilePath(self, value):
+        self._policyFilePath = value
+
+    @property
+    def reconnectionBound(self):
+        """
+            int: The optional parameter reconnectionBound specifies the number of successive connection attempts that occur when a connection fails or a disconnect occurs. It is used only when the reconnectionPolicy parameter is set to BoundedRetry; otherwise, it is ignored. The default value is 5 .
+        """
+        return self._reconnectionBound
+
+    @reconnectionBound.setter
+    def reconnectionBound(self, value):
+        self._reconnectionBound = value
+
+
+
+    @property
+    def reconnectionInterval(self):
+        """
+            int: The optional parameter reconnectionInterval specifies the amount of time (in seconds) that the operator waits between successive connection attempts. It is used only when the reconnectionPolicy parameter is set to BoundedRetry or InfiniteRetry; othewise, it is ignored. The default value is 10 . 
+        """
+        return self._reconnectionInterval
+
+    @reconnectionInterval.setter
+    def reconnectionInterval(self, value):
+        self._reconnectionInterval = value
+
+
+    @property
+    def reconnectionPolicy(self):
+        """
+            str: The optional parameter reconnectionPolicy specifies the policy that is used by the operator to handle HDFS connection failures. The valid values are: NoRetry, InfiniteRetry , and BoundedRetry . The default value is BoundedRetry .
+        """
+        return self._reconnectionPolicy
+
+    @reconnectionPolicy.setter
+    def reconnectionPolicy(self, value):
+        self._reconnectionPolicy = value
+
+
+    @property
+    def blockSize(self):
+        """
+            int: The parameter blockSize specifies the minimum time between directory scans. The default value is 5.0 seconds.
+        """
+        return self._blockSize
+
+    @blockSize.setter
+    def blockSize(self, value):
+        self._blockSize = value
+
+    @property
+    def vmArg(self):
+        """
+            str: The optional parameter vmArg parameter to specify additional JVM arguments that are required by the specific invocation of the operator. 
+        """
+        return self._vmArg
+
+    @vmArg.setter
+    def vmArg(self, value):
+        self._vmArg = value
+
+    def populate(self, topology, stream, schema, name, **options):
+
+        self.credentials, self.hdfsUri, self.hdfsUser, self.hdfsPassword, self.configPath=_setCredentials(self.localCredentials, topology)
+  
+        if self.initDelay is not None:
+            self.initDelay = streamsx.spl.types.float64(self.initDelay)
+        if self.authKeytab is not None:
+            self.authKeytab = streamsx.spl.op.Expression.expression(self.authKeytab)
+            
+ 
+
+        _op = _HDFS2FileSource(stream=stream, \
+                        schema=self.schema, \
+                        appConfigName=self.appConfigName, \
+                        authKeytab=self.authKeytab, \
+                        authPrincipal=self.authPrincipal, \
+                        blockSize=self.blockSize, \
+                        encoding=self.encoding, \
+                        
+                        configPath=self.configPath, \
+                        credFile=self.credFile, \
+                        credentials=self.credentials, \
+                        file=self.file, \
+                        hdfsPassword=self.hdfsPassword, \
+                        hdfsUri=self.hdfsUri, \
+                        hdfsUser=self.hdfsUser, \
+                        initDelay=self.initDelay, \
+                        keyStorePassword=self.keyStorePassword, \
+                        keyStorePath=self.keyStorePath, \
+                        libPath=self.libPath, \
+                        policyFilePath=self.policyFilePath, \
+                        reconnectionBound=self.reconnectionBound, \
+                        reconnectionInterval=self.reconnectionInterval, \
+                        reconnectionPolicy=self.reconnectionPolicy, \
+                        vmArg=self.vmArg, \
+                        name=name)
+
+        return _op.outputs[0]

@@ -1,0 +1,9 @@
+Version=4.3.1.0
+ProductName=IBM Streams
+Build=20190613135600
+Architecture=x86_64
+OS=Red Hat Enterprise Linux Server release 7.0 (Maipo)
+OS.VERSION=7
+OS.PATCH=0
+Edition=Developer
+EditionName=IBM Streams Developer Edition

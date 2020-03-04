@@ -6,6 +6,8 @@ import streamsx as streamsx
 from streamsx.topology.tester import Tester
 import streamsx.spl.toolkit as tk
 import streamsx.rest as sr
+import streamsx.spl.op as op
+from streamsx.topology.schema import CommonSchema, StreamSchema
 
 
 import unittest
@@ -74,7 +76,7 @@ class TestParams(unittest.TestCase):
     def test_bad_cred_param(self):
         topo = Topology()
         # expect ValueError because credentials is neither a dict nor a file
-        self.assertRaises(ValueError, hdfs.scan, topo, credentials='invalid', directory='any_dir')
+        self.assertRaises(TypeError, hdfs.scan, topo, credentials='invalid', directory='any_dir')
         # expect ValueError because credentials is not expected JSON format
         invalid_creds = json.loads('{"user" : "user", "password" : "xx", "uri" : "xxx"}')
         self.assertRaises(ValueError, hdfs.scan, topo, credentials=invalid_creds, directory='any_dir')
@@ -97,11 +99,191 @@ class TestParams(unittest.TestCase):
             credentials = json.load(data_file)
         topo = Topology()
         s = topo.source(['Hello World!']).as_string()
-        # expect ValueError because bytes_per_file, time_per_file, and tuples_per_file parameters are mutually exclusive.
-        self.assertRaises(ValueError, hdfs.write, s, credentials=credentials, file='any_file', time_per_file=5, tuples_per_file=5)
-        self.assertRaises(ValueError, hdfs.write, s, credentials=credentials, file='any_file', bytes_per_file=5, time_per_file=5)
-        self.assertRaises(ValueError, hdfs.write, s, credentials=credentials, file='any_file', bytes_per_file=5, tuples_per_file=5)
-        self.assertRaises(ValueError, hdfs.write, s, credentials=credentials, file='any_file', bytes_per_file=200, time_per_file=5, tuples_per_file=5)
+        # expect ValueError because bytesPerFile, timePerFile, and tuplesPerFile parameters are mutually exclusive.
+        self.assertRaises(ValueError, hdfs.write, s, credentials=credentials, file='any_file', timePerFile=5, tuplesPerFile=5)
+        self.assertRaises(ValueError, hdfs.write, s, credentials=credentials, file='any_file', bytesPerFile=5, timePerFile=5)
+        self.assertRaises(ValueError, hdfs.write, s, credentials=credentials, file='any_file', bytesPerFile=5, tuplesPerFile=5)
+        self.assertRaises(ValueError, hdfs.write, s, credentials=credentials, file='any_file', bytesPerFile=200, timePerFile=5, tuplesPerFile=5)
+
+
+
+class TestFileSink(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        print (str(self))
+
+    def setUp(self):
+        Tester.setup_distributed(self)
+        self.hdfs_toolkit_location = os.environ['STREAMS_HDFS_TOOLKIT']
+
+
+    def _build_only(self, name, topo):
+        result = streamsx.topology.context.submit("TOOLKIT", topo.graph) # creates tk* directory
+        print(name + ' (TOOLKIT):' + str(result))
+        assert(result.return_code == 0)
+        result = streamsx.topology.context.submit("BUNDLE", topo.graph)  # creates sab file
+        print(name + ' (BUNDLE):' + str(result))
+        assert(result.return_code == 0)
+
+     # ------------------------------------
+    @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
+    def test_HdfsFileSink(self):
+        hdfs_cfg_file = os.environ['HDFS_SITE_XML']
+        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
+        topo = Topology('test_composite')
+
+        if self.hdfs_toolkit_location is not None:
+            tk.add_toolkit(topo, self.hdfs_toolkit_location)
+
+        
+        pulse = op.Source(topo, "spl.utility::Beacon", 'tuple<rstring directory>', params = {'period':0.5, 'iterations':100})
+        pulse.directory = pulse.output('"This line will be written into a HDFS file via HdfsFileSink. " + (rstring) IterationCount()')
+
+        to_file = pulse.outputs[0]
+        config = {
+            'configPath' : hdfs_cfg_file
+        }
+
+        fsink = hdfs.HdfsFileSink(credentials=hdfs_cfg_file, file='pytest1/sample611.txt', **config)
+        to_file.for_each(fsink)
+        tester = Tester(topo)
+
+        cfg = {}
+        job_config = streamsx.topology.context.JobConfig(tracing='info')
+        job_config.add(cfg)
+        cfg[streamsx.topology.context.ConfigParams.SSL_VERIFY] = False
+
+        # Run the test
+        tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
+
+
+class TestFileSource(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        print (str(self))
+
+    def setUp(self):
+        Tester.setup_distributed(self)
+        self.hdfs_toolkit_location = os.environ['STREAMS_HDFS_TOOLKIT']
+
+
+    def _build_only(self, name, topo):
+        result = streamsx.topology.context.submit("TOOLKIT", topo.graph) # creates tk* directory
+        print(name + ' (TOOLKIT):' + str(result))
+        assert(result.return_code == 0)
+        result = streamsx.topology.context.submit("BUNDLE", topo.graph)  # creates sab file
+        print(name + ' (BUNDLE):' + str(result))
+        assert(result.return_code == 0)
+
+     # ------------------------------------
+    @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
+    def test_HdfsFileSource(self):
+        hdfs_cfg_file = os.environ['HDFS_SITE_XML']
+        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
+        topo = Topology('test_composite')
+
+        if self.hdfs_toolkit_location is not None:
+            tk.add_toolkit(topo, self.hdfs_toolkit_location)
+
+        sample_schema = StreamSchema('tuple<rstring directory>')
+
+
+        options = {
+            'initDelay': 2.0,
+            'sleepTime' : 2.0,
+            'pattern' : 'sample.*txt'
+        }       
+
+        scanned = topo.source(hdfs.HdfsDirectoryScan(credentials=hdfs_cfg_file, directory='pytest1', schema=sample_schema, **options))
+
+        scanned.print()
+        
+ 
+        sourceParamaters = {
+            'configPath' : hdfs_cfg_file
+        }
+
+        source_schema = StreamSchema('tuple<rstring line>')
+
+        fsource = scanned.map(hdfs.HdfsFileSource(credentials=hdfs_cfg_file, schema=source_schema, **sourceParamaters))
+
+        fsource.print()
+        tester = Tester(topo)
+
+        cfg = {}
+        job_config = streamsx.topology.context.JobConfig(tracing='info')
+        job_config.add(cfg)
+        cfg[streamsx.topology.context.ConfigParams.SSL_VERIFY] = False
+
+        # Run the test
+        tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
+
+
+
+
+class TestDirScan(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        print (str(self))
+
+    def setUp(self):
+        Tester.setup_distributed(self)
+        self.hdfs_toolkit_location = os.environ['STREAMS_HDFS_TOOLKIT']
+
+
+    def _build_only(self, name, topo):
+        result = streamsx.topology.context.submit("TOOLKIT", topo.graph) # creates tk* directory
+        print(name + ' (TOOLKIT):' + str(result))
+        assert(result.return_code == 0)
+        result = streamsx.topology.context.submit("BUNDLE", topo.graph)  # creates sab file
+        print(name + ' (BUNDLE):' + str(result))
+        assert(result.return_code == 0)
+
+
+     # ------------------------------------
+    @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
+    def test_HdfsDirectoryScan(self):
+        hdfs_cfg_file = os.environ['HDFS_SITE_XML']
+        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
+        topo = Topology('test_composite')
+
+        if self.hdfs_toolkit_location is not None:
+            tk.add_toolkit(topo, self.hdfs_toolkit_location)
+
+        credentials=hdfs_cfg_file 
+        directory='pytest1'
+        print ('\n---------'+str(self))
+        name = 'test_HdfsDirScan'
+        topo = Topology(name)
+
+
+        sample_schema = StreamSchema('tuple<rstring directory>')
+       
+        options = {
+            'initDelay': 2.0,
+            'sleepTime' : 2.0,
+            'pattern' : 'sample.*txt'
+        }       
+        
+        scannedFileNames = topo.source(hdfs.HdfsDirectoryScan(credentials, directory=directory, schema=sample_schema, **options))
+        scannedFileNames.print(name='printScannedFileNames')
+ 
+        tester = Tester(topo)
+
+        cfg = {}
+        job_config = streamsx.topology.context.JobConfig(tracing='info')
+        job_config.add(cfg)
+        cfg[streamsx.topology.context.ConfigParams.SSL_VERIFY] = False
+
+        # Run the test
+        tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
+
+ 
+
+
 
 
 class TestDistributed(unittest.TestCase):
@@ -245,7 +427,7 @@ class TestDistributed(unittest.TestCase):
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
 
         s = topo.source(['Hello World!','Hello','World','Hello World!','Hello','World']).as_string()
-        result = hdfs.write(s, credentials=credentials, file='pytest/write_test%FILENUM.txt', tuples_per_file=3)
+        result = hdfs.write(s, credentials=credentials, file='pytest/write_test%FILENUM.txt', tuplesPerFile=3)
         result.print()
 
         tester = Tester(topo)
