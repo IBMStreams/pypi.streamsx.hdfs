@@ -84,6 +84,21 @@ or
     ant test
 
 
+### Composite Test with local Streams instance 
+
+This test requires STREAMS_INSTALL set and a running Streams instance.
+
+Required envionment variable `STREAMS_HDFS_TOOLKIT` for the `com.ibm.streamsx.hdfs` toolkit location: 
+and envionment variable `HDFS_SITE_XML' for the HDFS configuration xml file core.site.xml
+
+```
+cd package
+python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestCompositeDistributed
+```
+
+
+
+
 ### Test with Streaming Analytics Service
 
 This requires Streaming Analytics service and IBM Analytics Engine service in IBM cloud.
@@ -98,6 +113,18 @@ python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestCloud.test_close_on_tup
 or
 
     ant test-sas
+
+
+### Composite Test with IBM Analytic Engine
+
+This test requires a runing Ibm Analytics Engine with a running HDFS instance.
+
+Required envionment variable `ANALYTICS_ENGINE` that contains the Hadoop cluster webhdfs credentilas as a JSON string 
+
+```
+cd package
+python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestCompositeCloud
+```
 
 
 #### Remote build

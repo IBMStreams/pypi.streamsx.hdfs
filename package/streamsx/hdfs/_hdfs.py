@@ -61,7 +61,7 @@ def _read_service_credentials(credentials):
             else:
                 raise ValueError(credentials)
     else:
-        raise TypeError(credentials)
+         raise TypeError(credentials)
     # construct expected format for hdfs_uri: webhdfs://host:port
     uri_parsed = urlparse(hdfs_uri)
     hdfs_uri = 'webhdfs://'+uri_parsed.netloc
@@ -75,7 +75,8 @@ def _check_vresion_credentials1(credentials, _op, topology):
         #    if credentials is None:
         #        raise SystemExit("Error: credentials is empty.")
         print( credentials)
-        print( '--------------------------+++---' + str(credentials))
+        topology.stream.name
+        print( '------------' + topology.stream.name + " "  + str(credentials))
         if isinstance(credentials, dict):
             hdfs_uri, user, password = _read_service_credentials(credentials)
             _op.params['hdfsUri'] = hdfs_uri
@@ -105,7 +106,7 @@ def _setCredentials(LocalCredentials, topology):
     hdfsPassword=None
     configPath=None
     if LocalCredentials is not None:
-         print( '-----------  Credentials ------------------ ' + str(LocalCredentials))
+         # print( '-----  Credentials -----' + topology.name + " : "  + str(LocalCredentials))
          # check the streamsx.hdfs toolkit version           
          _add_toolkit_dependency(topology)     
          
@@ -116,10 +117,12 @@ def _setCredentials(LocalCredentials, topology):
                       configPath = 'etc'
                       credentials = None
              except IOError:
-         #                raise SystemExit("File " + credentials + " not accessible.")     
                 raise ValueError(LocalCredentials)
          else:
-             hdfsUri, hdfsUser, hdfsPassword = _read_service_credentials(LocalCredentials)
+             if isinstance(credentials, dict):
+                 hdfsUri, hdfsUser, hdfsPassword = _read_service_credentials(LocalCredentials)
+             else:
+                credentials=LocalCredentials
   
     return credentials, hdfsUri, hdfsUser, hdfsPassword, configPath
 
@@ -658,12 +661,11 @@ class HdfsDirectoryScan(streamsx.topology.composite.Source):
 
     Example, scanning for files in testDir directory::
 
-        import streamsx.standard.files as files
+        import streamsx.hdfs as hdfs
         from streamsx.topology.topology import Topology
 
         dir = '/user/streamsadmin/testDir'
         config = {
-            'configPath' : 'usr/hdp/hadoop/conf',
             'initDelay': 2.0,
             'sleepTime' : 2.0,
             'pattern' : 'sample.*txt'
@@ -677,6 +679,8 @@ class HdfsDirectoryScan(streamsx.topology.composite.Source):
 
     Attributes
     ----------
+    credentials : dict|str
+        The credentials of Hadoop cluster as dict or JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
     directory : str|Expression
         Specifies the name of the directory to be scanned
     pattern : str
@@ -692,27 +696,27 @@ class HdfsDirectoryScan(streamsx.topology.composite.Source):
         self.appConfigName = None
         self.localCredentials = credentials
         self.credentials = None
+        self.configPath = None
         self.directory = directory
         self.schema = schema
         self.pattern = pattern
         self.sleepTime = None
         self.initDelay = initDelay
         self.authKeytab = None
+        self.authPrincipal = None
         self.credFile = None
         self.hdfsPassword = None
+        self.hdfsUri = None
         self.hdfsUser = None
         self.keyStorePassword = None
         self.keyStorePath = None
         self.libPath = None
         self.policyFilePath = None
         self.reconnectionBound = None
-        self.hdfsUri = None
         self.reconnectionInterval = None
         self.reconnectionPolicy = None
         self.strictMode = None
         self.vmArg = None
-        self.configPath = None
-        self.ignore_existing_files_at_startup = None
   
 
         if 'appConfigName' in options:
@@ -733,12 +737,13 @@ class HdfsDirectoryScan(streamsx.topology.composite.Source):
             self.authPrincipal = options.get('authPrincipal')
         if 'configPath' in options:
             self.configPath = options.get('configPath')
-        if 'configPath' in options:
-            self.configPath = options.get('configPath')
         if 'strictMode' in options:
-            self.strictMode = options.get('strictMode')
+            self.strictMode = options.get('strictMode')  
+        if 'keyStorePassword' in options:
+            self.keyStorePassword = options.get('keyStorePassword')
+        if 'keyStorePath' in options:
+            self.keyStorePath = options.get('keyStorePath')
   
-
 
     @property
     def appConfigName(self):
@@ -767,7 +772,7 @@ class HdfsDirectoryScan(streamsx.topology.composite.Source):
         """
             str: The optional parameter authPrincipal specifies the Kerberos principal that you use for authentication. This value is set to the principal that is created for the IBM Streams instance owner. You must specify this parameter if you want to use Kerberos authentication. 
         """
-        return self._authKeytab
+        return self._authPrincipal
 
     @authPrincipal.setter
     def authPrincipal(self, value):
@@ -993,11 +998,14 @@ class HdfsDirectoryScan(streamsx.topology.composite.Source):
             self.sleepTime = streamsx.spl.types.float64(self.sleepTime)
         if self.initDelay is not None:
             self.initDelay = streamsx.spl.types.float64(self.initDelay)
+
         if self.strictMode is not None:
             if self.strictMode is True:
                 self.strictMode = streamsx.spl.op.Expression.expression('true')
-        if self.authKeytab is not None:
-            self.authKeytab = streamsx.spl.op.Expression.expression(self.authKeytab)
+            else:
+                self.strictMode = streamsx.spl.op.Expression.expression('false')
+
+
             
         _op = _HDFS2DirectoryScan(topology=topology, \
                         schema=self.schema, \
@@ -1036,29 +1044,26 @@ class HdfsFileSink(streamsx.topology.composite.ForEach):
 
     Example for writing a stream to a file::
 
-        import streamsx.standard.files as files
+        import streamsx.hdfs as hdfs
         from streamsx.topology.topology import Topology
 
         topo = Topology()
         s = topo.source(['Hello', 'World!']).as_string()
-        s.for_each(files.FileSink(file='/tmp/data.txt'))
+        s.for_each(hdfs.HdfsFileSink(credentials=credentials, file='/user/hdfs/data.txt'))
 
     Example with specifying parameters as kwargs and construct the name of the file with the attribute ``filename`` of the input stream::
 
         config = {
-            'format': Format.txt.name,
-            'tuplesPerFile': 50000,
-            'close_mode': CloseMode.count.name,
-            'write_punctuations': True,
-            'suppress': 'filename'
+            'hdfsUser': 'hdfs',
+            'tuplesPerFile': 50000
         }
-        fsink = files.FileSink(file=streamsx.spl.op.Expression.expression('"/tmp/"+'+'filename'), **config)
+        fsink = hdfs.HdfsFileSink(file=streamsx.spl.op.Expression.expression('pytest1/sample4%FILENUM.txt''), **config)
         to_file.for_each(fsink)
-
-    .. versionadded:: 0.5
 
     Attributes
     ----------
+    credentials : dict|str
+        The credentials of Hadoop cluster as dict or JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
     file : str
         Name of the output file.
     options : kwargs
@@ -1099,6 +1104,10 @@ class HdfsFileSink(streamsx.topology.composite.ForEach):
         
         if 'appConfigName' in options:
             self.appConfigName = options.get('appConfigName')
+        if 'bytesPerFile' in options:
+            self.bytesPerFile = options.get('bytesPerFile')
+        if 'closeOnPunct' in options:
+            self.closeOnPunct = options.get('closeOnPunct')
         if 'hdfsUser' in options:
             self.hdfsUser = options.get('hdfsUser')
         if 'hdfsUri' in options:
@@ -1115,8 +1124,16 @@ class HdfsFileSink(streamsx.topology.composite.ForEach):
             self.authPrincipal = options.get('authPrincipal')
         if 'configPath' in options:
             self.configPath = options.get('configPath')
-        if 'configPath' in options:
-            self.configPath = options.get('configPath')
+        if 'timeFormat' in options:
+            self.timeFormat = options.get('timeFormat')
+        if 'timePerFile' in options:
+            self.timePerFile = options.get('timePerFile')
+        if 'tuplesPerFile' in options:
+            self.tuplesPerFile = options.get('tuplesPerFile')
+        if 'keyStorePassword' in options:
+            self.keyStorePassword = options.get('keyStorePassword')
+        if 'keyStorePath' in options:
+            self.keyStorePath = options.get('keyStorePath')
  
     @property
     def appConfigName(self):
@@ -1145,12 +1162,25 @@ class HdfsFileSink(streamsx.topology.composite.ForEach):
         """
             str: The optional parameter authPrincipal specifies the Kerberos principal that you use for authentication. This value is set to the principal that is created for the IBM Streams instance owner. You must specify this parameter if you want to use Kerberos authentication. 
         """
-        return self._authKeytab
+        return self._authPrincipal
 
     @authPrincipal.setter
     def authPrincipal(self, value):
         self._authPrincipal = value
      
+
+    @property
+    def bytesPerFile(self):
+        """
+            int: This parameter specifies the approximate size of the output file, in bytes. When the file size exceeds the specified number of bytes, the current output file is closed and a new file is opened. The bytesPerFile, timePerFile, and tuplesPerFile parameters are mutually exclusive; you can specify only one of these parameters at a time.
+        """
+        return self._bytesPerFile
+
+    @bytesPerFile.setter
+    def bytesPerFile(self, value):
+        self._bytesPerFile = value
+
+
 
     @property
     def configPath(self):
@@ -1186,17 +1216,26 @@ class HdfsFileSink(streamsx.topology.composite.ForEach):
         self._credentials = value
 
     @property
+    def closeOnPunct(self):
+        """
+            bool: This parameter specifies whether the operator closes the current output file and creates a new file when a punctuation marker is received. The default value is false . 
+        """
+        return self._closeOnPunct
+
+    @closeOnPunct.setter
+    def closeOnPunct(self, value):
+        self._closeOnPunct = value
+
+    @property
     def fileAttributeName(self):
         """
-            str: The optional parameter fileAttributeName specifies the JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
+            str: If set, this points to an attribute containing the filename. The operator will close a file when value of this attribute changes. If the string contains substitutions, the check for a change happens before substituations, and the filename contains the substitutions based on the first tuple. 
         """
         return self._fileAttributeName
 
     @fileAttributeName.setter
     def fileAttributeName(self, value):
         self._fileAttributeName = value
-
-
 
     @property
     def hdfsPassword(self):
@@ -1304,7 +1343,6 @@ class HdfsFileSink(streamsx.topology.composite.ForEach):
         self._reconnectionBound = value
 
 
-
     @property
     def reconnectionInterval(self):
         """
@@ -1340,6 +1378,52 @@ class HdfsFileSink(streamsx.topology.composite.ForEach):
     def sleepTime(self, value):
         self._sleepTime = value
 
+
+    @property
+    def tempFile(self):
+        """
+            str: This parameter specifies the name of the file that the operator writes to. When the file is closed the file is renamed to the final filename defined by the file parameter or fileAttributeName parameter. 
+        """
+        return self._tempFile
+
+    @tempFile.setter
+    def tempFile(self, value):
+        self._tempFile = value
+
+
+    @property
+    def timeFormat(self):
+        """
+            str: This parameter specifies the time format to use when the file parameter value contains %TIME . The parameter value must contain conversion specifications that are supported by the java.text.SimpleDateFormat. The default format is yyyyMMdd_HHmmss . 
+        """
+        return self._timeFormat
+
+    @timeFormat.setter
+    def timeFormat(self, value):
+        self._timeFormat = value
+
+
+    @property
+    def timePerFile(self):
+        """
+            float: This parameter specifies the approximate time, in seconds, after which the current output file is closed and a new file is opened for writing. The bytesPerFile, timePerFile, and tuplesPerFile parameters are mutually exclusive; you can specify only one of these parameters. 
+        """
+        return self._timePerFile
+
+    @timePerFile.setter
+    def timePerFile(self, value):
+        self.timePerFile = value
+
+    @property
+    def tuplesPerFile(self):
+        """
+            int: This parameter specifies the maximum number of tuples that can be received for each output file. When the specified number of tuples are received, the current output file is closed and a new file is opened for writing. The bytesPerFile, timePerFile, and tuplesPerFile parameters are mutually exclusive; you can specify only one of these parameters at a time.
+        """
+        return self._tuplesPerFile
+
+    @tuplesPerFile.setter
+    def tuplesPerFile(self, value):
+        self._tuplesPerFile = value
 
     @property
     def vmArg(self):
@@ -1392,43 +1476,23 @@ class HdfsFileSink(streamsx.topology.composite.ForEach):
         self._timePerFile = value
 
 
-    @property
-    def tuplesPerFile(self):
-        """
-            int: Specifies the maximum number of tuples that can be received for each output file. When the specified number of tuples are received, the current output file is closed and a new file is opened for writing. This parameter must be specified when the :py:meth:`~streamsx.standard.files.FileSink.close_mode` parameter is set to count.
-        """
-        return self._tuplesPerFile
-
-    @tuplesPerFile.setter
-    def tuplesPerFile(self, value):
-        self._tuplesPerFile = value
-
-
     def populate(self, topology, stream, name, **options) -> streamsx.topology.topology.Sink:
 
-        """     
-        _add_toolkit_dependency(topology)
-        if self.credentials is not None:
-            if not (_is_a_valid_json(self.credentials)):               
-                try:
-                    with open(self.credentials):
-                        print(self.credentials)
-                        topology.add_file_dependency(self.credentials, 'etc')
-                        self.configPath = 'etc'
-                        self.credentials = None
-                except IOError:
-                    raise SystemExit("File " + self.credentials + " not accessible.")
-        """           
-  
     
         self.credentials, self.hdfsUri, self.hdfsUser, self.hdfsPassword, self.configPath=_setCredentials(self.localCredentials, topology)
        
         if self.bytesPerFile is not None:
-            self.bytesPerFile = streamsx.spl.types.uint32(self.bytesPerFile)
+            self.bytesPerFile = streamsx.spl.types.int64(self.bytesPerFile)
         if self.timePerFile is not None:
             self.timePerFile = streamsx.spl.types.float64(self.timePerFile)
         if self.tuplesPerFile is not None:
-            self.tuplesPerFile = streamsx.spl.types.uint32(self.tuplesPerFile)
+            self.tuplesPerFile = streamsx.spl.types.int64(self.tuplesPerFile)
+
+        if self.closeOnPunct is not None:
+            if self.closeOnPunct is True:
+                self.closeOnPunct = streamsx.spl.op.Expression.expression('true')
+            else:
+                self.closeOnPunct = streamsx.spl.op.Expression.expression('false')
 
 
         _op = _HDFS2FileSink(stream=stream, \
@@ -1464,33 +1528,35 @@ class HdfsFileSink(streamsx.topology.composite.ForEach):
 
 class HdfsFileSource(streamsx.topology.composite.Map):
     """
-    Watches a HDFS directory, and generates file names on the output, one for each file that is found in the directory.
+    Reads HDFS files given by input stream and generates tuples with the file content on the output stream.
 
-    Example, scanning for files in testDir directory::
+
+    Example, scanning for HDFS files in pytest directory and reading files via HdfsFileSource::
 
         import streamsx.standard.files as files
-        from streamsx.topology.topology import Topology
-
-        dir = '/user/streamsadmin/testDir'
-        config = {
-            'configPath' : 'usr/hdp/hadoop/conf',
+        import streamsx.hdfs as hdfs
+        sample_schema = StreamSchema('tuple<rstring directory>')
+        options = {
             'initDelay': 2.0,
             'sleepTime' : 2.0,
             'pattern' : 'sample.*txt'
         }       
 
-        s = topo.source(hdfs.DirectoryScan(directory=dir, **config))
+        scannedHdfsFiles = topo.source(hdfs.HdfsDirectoryScan(credentials=credentials, directory='pytest', schema=sample_schema, **options))
 
-    Example, scanning for files with "csv" file extension::
+        sourceParamaters = {
+            'configPath' : hdfs_cfg_file
+        }
 
-        s = topo.source(hdfs.HdfsDirectoryScan(directory='/user/streamsadmin/testDir', pattern='.*\.csv$'))
+        source_schema = StreamSchema('tuple<rstring line>')
+
+        fsource = scannedHdfsFiles.map(hdfs.HdfsFileSource(credentials=hdfs_cfg_file, schema=source_schema, **sourceParamaters))
+
 
     Attributes
     ----------
-    directory : str|Expression
-        Specifies the name of the directory to be scanned
-    pattern : str
-        Instructs the operator to ignore file names that do not match the regular expression pattern
+    credentials : dict|str
+        The credentials of Hadoop cluster as dict or JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
     schema : StreamSchema
         Output schema, defaults to CommonSchema.String
     options : kwargs
@@ -1499,7 +1565,6 @@ class HdfsFileSource(streamsx.topology.composite.Map):
 
 
     def __init__(self, credentials, schema=CommonSchema.String, **options):
-#        self.stream = None
         self.appConfigName = None
         self.authKeytab = None
         self.authPrincipal = None
@@ -1523,11 +1588,12 @@ class HdfsFileSource(streamsx.topology.composite.Map):
         self.reconnectionInterval = None
         self.reconnectionPolicy = None
         self.vmArg = None
-        self.ignore_existing_files_at_startup = None
   
 
         if 'appConfigName' in options:
             self.appConfigName = options.get('appConfigName')
+        if 'blockSize' in options:
+            self.configPath = options.get('blockSize')
         if 'hdfsUser' in options:
             self.hdfsUser = options.get('hdfsUser')
         if 'hdfsUri' in options:
@@ -1542,8 +1608,10 @@ class HdfsFileSource(streamsx.topology.composite.Map):
             self.authPrincipal = options.get('authPrincipal')
         if 'configPath' in options:
             self.configPath = options.get('configPath')
-        if 'configPath' in options:
-            self.configPath = options.get('configPath')
+        if 'keyStorePassword' in options:
+            self.keyStorePassword = options.get('keyStorePassword')
+        if 'keyStorePath' in options:
+            self.keyStorePath = options.get('keyStorePath')
   
 
 
@@ -1574,11 +1642,21 @@ class HdfsFileSource(streamsx.topology.composite.Map):
         """
             str: The optional parameter authPrincipal specifies the Kerberos principal that you use for authentication. This value is set to the principal that is created for the IBM Streams instance owner. You must specify this parameter if you want to use Kerberos authentication. 
         """
-        return self._authKeytab
+        return self._authPrincipal
 
     @authPrincipal.setter
     def authPrincipal(self, value):
         self._authPrincipal = value
+    @property
+    def blockSize(self):
+        """
+            int: The optional parameter blockSize specifies the maximum number of bytes to be read at one time when reading a file into binary mode (ie, into a blob); thus, it is the maximum size of the blobs on the output stream. The parameter is optional, and defaults to 4096 . 
+        """
+        return self._blockSize
+
+    @blockSize.setter
+    def blockSize(self, value):
+        self._blockSize = value
      
 
     @property
@@ -1617,7 +1695,7 @@ class HdfsFileSource(streamsx.topology.composite.Map):
     @property
     def encoding(self):
         """
-            str: The optional parameter encoding specifies the JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
+            str: This optional parameter specifies the encoding to use when reading files. The default value is UTF-8 . 
         """
         return self._encoding
 
@@ -1629,7 +1707,7 @@ class HdfsFileSource(streamsx.topology.composite.Map):
     @property
     def file(self):
         """
-            str: The optional parameter credentials specifies the JSON string that contains the hdfs credentials key/value pairs for user, password and webhdfs .
+            str: This parameter specifies the name of the file that the operator opens and reads. This parameter must be specified when the optional input port is not configured. If the optional input port is used and the file name is specified, the operator generates an error. 
         """
         return self._file
 
@@ -1676,7 +1754,7 @@ class HdfsFileSource(streamsx.topology.composite.Map):
     @property
     def initDelay(self):
         """
-            float: The parameter initDelay specifies the time to wait in seconds before the operator HDFS2DirectoryScan reads the first file. The default value is 0 . 
+            float: The parameter initDelay specifies the time to wait in seconds before the operator HDFS2FileSource reads the first file. The default value is 0 . 
         """
         return self._initDelay
 
@@ -1719,18 +1797,6 @@ class HdfsFileSource(streamsx.topology.composite.Map):
     @libPath.setter
     def libPath(self, value):
         self._libPath = value
-
-    @property
-    def pattern(self):
-        """
-            str: The optional parameter pattern limits the file names that are listed to the names that match the specified regular expression. The HDFS2DirectoryScan operator ignores file names that do not match the specified regular expression. 
-        """
-        return self._pattern
-
-
-    @pattern.setter
-    def pattern(self, value):
-        self._pattern = value
 
     @property
     def policyFilePath(self):
@@ -1782,17 +1848,6 @@ class HdfsFileSource(streamsx.topology.composite.Map):
 
 
     @property
-    def blockSize(self):
-        """
-            int: The parameter blockSize specifies the minimum time between directory scans. The default value is 5.0 seconds.
-        """
-        return self._blockSize
-
-    @blockSize.setter
-    def blockSize(self, value):
-        self._blockSize = value
-
-    @property
     def vmArg(self):
         """
             str: The optional parameter vmArg parameter to specify additional JVM arguments that are required by the specific invocation of the operator. 
@@ -1809,6 +1864,8 @@ class HdfsFileSource(streamsx.topology.composite.Map):
   
         if self.initDelay is not None:
             self.initDelay = streamsx.spl.types.float64(self.initDelay)
+        if self.blockSize is not None:
+            self.blockSize = streamsx.spl.types.int32(self.blockSize)
         if self.authKeytab is not None:
             self.authKeytab = streamsx.spl.op.Expression.expression(self.authKeytab)
             
@@ -1821,7 +1878,6 @@ class HdfsFileSource(streamsx.topology.composite.Map):
                         authPrincipal=self.authPrincipal, \
                         blockSize=self.blockSize, \
                         encoding=self.encoding, \
-                        
                         configPath=self.configPath, \
                         credFile=self.credFile, \
                         credentials=self.credentials, \
