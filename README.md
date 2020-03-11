@@ -86,11 +86,13 @@ or
 
 ### Composite Test with local Streams instance 
 
-This test requires STREAMS_INSTALL set and a running Streams instance.
+This test requires:
+- The environment variable `STREAMS_INSTALL` set and the Streams instance is running.
+- The environment variable `STREAMS_HDFS_TOOLKIT` set for the `com.ibm.streamsx.hdfs` toolkit location: 
+- A runing Ibm HADOOP cluster with a running HDFS instance.
+- The environment variable `HDFS_SITE_XML` set to the HDFS configuration file `core.site.xml`.
 
-Required environment variable `STREAMS_HDFS_TOOLKIT` for the `com.ibm.streamsx.hdfs` toolkit location: 
-and environment variable `HDFS_SITE_XML' for the HDFS configuration xml file core.site.xml
-This test copies the HDFS configiration file 'core.site.xml' in etc directory and perform the following tests.
+This test copies the HDFS configiration file 'core.site.xml' in the application directory `etc` and perform the following tests:
 
 - The standard operator `Beacon` generates 1000 lines.
 - The `HdfsFileSink` opeartor writes every 100 lines produced by Beacon operator in a new file in 'pytest' (sample41.txt, sample42.txt, ...)
@@ -126,14 +128,13 @@ or
 
 ### Composite Test with IBM Analytic Engine
 
-This test requires STREAMS_INSTALL set and a running Streams instance.
-Required environment variable `STREAMS_HDFS_TOOLKIT` for the `com.ibm.streamsx.hdfs` toolkit location: 
+This test requires:
+- The environment variable `STREAMS_INSTALL` set and the Streams instance is running.
+- The environment variable `STREAMS_HDFS_TOOLKIT` set for the `com.ibm.streamsx.hdfs` toolkit location: 
+- A runing Ibm Analytics Engine HADOOP cluster with a running HDFS instance.
+- The environment variable `ANALYTICS_ENGINE` set to credential file that contains the Hadoop cluster webhdfs credentilas as a JSON string.
 
-And requires a runing Ibm Analytics Engine with a running HDFS instance.
-
-Required environment variable `ANALYTICS_ENGINE` that contains the Hadoop cluster webhdfs credentilas as a JSON string.
-
-This test redas the IAE credentilas (HdfsUri, HdfsUser, HdfsPassword) and perform the following tests.
+This test redas the IAE credentilas (HdfsUri, HdfsUser, HdfsPassword) from JSON file and perform the following tests:
 
 - The standard operator `Beacon` generates 1000 lines.
 - The `HdfsFileSink` opeartor writes every 100 lines produced by Beacon operator in a new file in 'pytest' (sample41.txt, sample42.txt, ...)
@@ -161,5 +162,4 @@ or
 cd package
 python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestCloudRemote.test_close_on_tuples streamsx.hdfs.tests.test_hdfs.TestCloudRemote.test_hdfs_uri
 ```
-
 
