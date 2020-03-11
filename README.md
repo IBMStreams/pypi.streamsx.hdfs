@@ -137,7 +137,8 @@ This test requires:
 This test redas the IAE credentilas (HdfsUri, HdfsUser, HdfsPassword) from JSON file and perform the following tests:
 
 - The standard operator `Beacon` generates 1000 lines.
-- The `HdfsFileSink` opeartor writes every 100 lines produced by Beacon operator in a new file in 'pytest' (sample41.txt, sample42.txt, ...)
+- The `HdfsFileSink` opeartor writes every 100 lines produced by Beacon operator in a new file in `pytest` directory
+  `sample41.txt, sample42.txt, ...`
 - The `HdfsDirectoryScan` operator scans the directory `pytest` and delivers HDFS file names in output port.
 - The `HdfsFileSource` operator reads HDFS files in directory `pytest` deliverd by HdfsDirectoryScan and returns the lines of files in output port.
 
