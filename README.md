@@ -90,6 +90,15 @@ This test requires STREAMS_INSTALL set and a running Streams instance.
 
 Required envionment variable `STREAMS_HDFS_TOOLKIT` for the `com.ibm.streamsx.hdfs` toolkit location: 
 and envionment variable `HDFS_SITE_XML' for the HDFS configuration xml file core.site.xml
+This test copies the HDFS configiration file 'core.site.xml' in etc directory and perform the following tests.
+
+1- The standart operator Beacon generates 1000 lines
+2- HdfsFileSink writes every 100 lines produced by Beacon operator in a new file in 'pytest' (sample41.txt, sample42.txt, ...)
+3- HdfsDirectoryScan scans the directory 'pytest' and delivers HDFS file names in output port.
+4- HdfsFileSource reads HDFS files in directory 'pytest' deliverd by HdfsDirectoryScan and returns the lines of files in output port.
+5- HdfsDirectoryScan scans the directory 'pytest' and delivers HDFS file names in output port.
+6- HdfsFileCopy copies HDFS files from directory 'pytest' deliverd by HdfsDirectoryScan into local directory '/tmp'
+
 
 ```
 cd package
@@ -117,13 +126,24 @@ or
 
 ### Composite Test with IBM Analytic Engine
 
-This test requires a runing Ibm Analytics Engine with a running HDFS instance.
+This test requires STREAMS_INSTALL set and a running Streams instance.
+Required envionment variable `STREAMS_HDFS_TOOLKIT` for the `com.ibm.streamsx.hdfs` toolkit location: 
 
-Required envionment variable `ANALYTICS_ENGINE` that contains the Hadoop cluster webhdfs credentilas as a JSON string 
+And requires a runing Ibm Analytics Engine with a running HDFS instance.
+
+Required envionment variable `ANALYTICS_ENGINE` that contains the Hadoop cluster webhdfs credentilas as a JSON string.
+
+This test redas the IAE credentilas (HdfsUri, HdfsUser, HdfsPassword) and perform the following tests.
+
+1- The standart operator Beacon generates 1000 lines
+2- HdfsFileSink writes every 100 lines produced by Beacon operator in a new file in 'pytest' (sample41.txt, sample42.txt, ...)
+3- HdfsDirectoryScan scans the directory 'pytest' and delivers HDFS file names in output port.
+4- HdfsFileSource reads HDFS files in directory 'pytest' deliverd by HdfsDirectoryScan and returns the lines of files in output port.
+
 
 ```
 cd package
-python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestCompositeCloud
+python3 -u -m unittest streamsx.hdfs.tests.test_hdfs.TestCompositeWebHdfs
 ```
 
 
