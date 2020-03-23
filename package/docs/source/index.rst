@@ -1,8 +1,8 @@
 streamsx.hdfs package
 #####################
 
-IBM Streams HDFS integration
-============================
+HDFS integration for IBM Streams
+================================
 
 For details of implementing applications in Python
 for IBM Streams including IBM Cloud Pak for Data and the Streaming Analytics service
