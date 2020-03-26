@@ -5,7 +5,7 @@ setup(
   packages = ['streamsx.hdfs'],
   include_package_data=True,
   version = streamsx.hdfs.__version__,
-  description = 'IBM Streams HDFS integration',
+  description = 'HDFS integration for IBM Streams',
   long_description = open('DESC.txt').read(),
   author = 'IBM Streams @ github.com',
   author_email = 'hegermar@de.ibm.com',
