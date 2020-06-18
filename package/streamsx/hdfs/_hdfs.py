@@ -147,9 +147,8 @@ def configure_connection (instance, name = 'hdfs', credentials = None):
 
     Example for creating a configuration for a Streams instance with connection details::
 
-        from streamsx.rest import Instance
-        import streamsx.topology.context
         from icpd_core import icpd_util
+        from streamsx.rest_primitives import Instance
         import streamsx.hdfs as hdfs
         
         cfg = icpd_util.get_service_instance_details (name='your-streams-instance')
