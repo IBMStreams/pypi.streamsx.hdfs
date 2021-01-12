@@ -65,7 +65,7 @@ a file to HDFS. Scan for created file on HDFS and read the content::
 
 """
 
-__version__='1.5.8'
+__version__='1.5.9'
 
 __all__ = ['HdfsDirectoryScan', 'HdfsFileSink', 'HdfsFileSource', 'HdfsFileCopy', 'download_toolkit', 'configure_connection', 'scan', 'read', 'write']
 from streamsx.hdfs._hdfs import download_toolkit, configure_connection, scan, read, write, copy, HdfsDirectoryScan, HdfsFileSink, HdfsFileSource, HdfsFileCopy
