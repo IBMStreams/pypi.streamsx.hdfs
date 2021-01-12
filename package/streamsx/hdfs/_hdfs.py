@@ -54,8 +54,14 @@ def _read_service_credentials(connection):
             host_port = connection.get('host') + ':' + str(connection.get('port'))
             hdfs_uri = "webhdfs://" +  host_port
         else:
-            host_port = connection.get('host') + ':' + str(connection.get('port'))
-            hdfs_uri = "hdfs://" +  host_port          
+            if 'host' in connection and 'port' in connection:
+                host_port = connection.get('host') + ':' + str(connection.get('port'))
+                hdfs_uri = "hdfs://" +  host_port
+            else:
+                if 'webhdfs' in connection and 'user' in connection and 'password' in connection:   
+                    user = connection.get('user')
+                    password = connection.get('password')
+                    hdfs_uri = connection.get('webhdfs')
     else:
          raise TypeError(connection)
  
@@ -241,8 +247,6 @@ def scan(topology, credentials, directory, pattern=None, init_delay=None, name=N
     credentials, hdfsUri, hdfsUser, hdfsPassword, configPath = _setCredentials(credentials, topology)
     _op = _HDFS2DirectoryScan(topology, configPath=configPath, credentials=credentials, hdfsUri=hdfsUri, hdfsUser=hdfsUser,  hdfsPassword=hdfsPassword, directory=directory, pattern=pattern, schema=DirectoryScanSchema, name=name)
 
- #   _check_vresion_credentials(credentials, _op, topology)
-
     if init_delay is not None:
         _op.params['initDelay'] = streamsx.spl.types.float64(_check_time_param(init_delay, 'init_delay'))
 
@@ -268,10 +272,8 @@ def scanComposite(topology, credentials, directory, pattern=None, init_delay=Non
 
     _op = HdfsDirectoryScan(topology, directory=directory, pattern=pattern, schema=DirectoryScanSchema, name=name)
 
-#    _check_vresion_credentials(credentials, _op, topology)
-
-#    if init_delay is not None:
-#        _op.params['initDelay'] = streamsx.spl.types.float64(_check_time_param(init_delay, 'init_delay'))
+    if init_delay is not None:
+        _op.params['initDelay'] = streamsx.spl.types.float64(_check_time_param(init_delay, 'init_delay'))
 
     return _op.outputs[0]
 
@@ -294,8 +296,6 @@ def read(stream, credentials, schema=CommonSchema.String, name=None):
 
     credentials, hdfsUri, hdfsUser, hdfsPassword, configPath = _setCredentials(credentials, stream.topology)
     _op = _HDFS2FileSource(stream, configPath=configPath, credentials=credentials, hdfsUri=hdfsUri, hdfsUser=hdfsUser,  hdfsPassword=hdfsPassword, schema=schema, name=name)
-
-#    _check_vresion_credentials(credentials, _op, stream.topology)
 
     return _op.outputs[0]
 
@@ -339,9 +339,6 @@ def write(stream, credentials, file=None, fileAttributeName=None, schema=None, t
     credentials, hdfsUri, hdfsUser, hdfsPassword, configPath = _setCredentials(credentials, stream.topology)
     _op = _HDFS2FileSink(stream, configPath=configPath, credentials=credentials, hdfsUri=hdfsUri, hdfsUser=hdfsUser,  hdfsPassword=hdfsPassword, file=file, fileAttributeName=fileAttributeName, schema=FileInfoSchema, name=name)
 
-#    _check_vresion_credentials(credentials, _op, stream.topology)
-    
-
     if timePerFile is None and tuplesPerFile is None and bytesPerFile is None:
         _op.params['closeOnPunct'] = _op.expression('true')
     if timePerFile is not None:
@@ -375,8 +372,6 @@ def copy(stream, credentials, direction, hdfsFile=None, hdfsFileAttrName=None, l
     
     credentials, hdfsUri, hdfsUser, hdfsPassword, configPath = _setCredentials(credentials, stream.topology)
     _op = _HDFS2FileCopy(stream, configPath=configPath, credentials=credentials, hdfsUri=hdfsUri, hdfsUser=hdfsUser,  hdfsPassword=hdfsPassword, direction=Direction, hdfsFileAttrName=hdfsFileAttrName, localFile=localFile , schema=FileCopySchema, name=name)
-
-#    _check_vresion_credentials(credentials, _op, stream.topology)
     
     return _op.outputs[0]
 
