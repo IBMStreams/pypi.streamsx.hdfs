@@ -57,40 +57,12 @@ def cloud_creds_env_var():
 
 class TestParams(unittest.TestCase):
 
-    @unittest.skipIf(cloud_creds_env_var() == False, "Missing ANALYTICS_ENGINE environment variable.")
-    def test_cloud_creds(self):
-        creds_file = os.environ['ANALYTICS_ENGINE']
-        with open(creds_file) as data_file:
-            credentials = json.load(data_file)
-        topo = Topology()
-        hdfs.scan(topo, credentials, 'a_dir')
-        hdfs.scan(topo, credentials=credentials, directory='a_dir', init_delay=10.0)
-
     @unittest.skipIf(site_xml_env_var() == False, "Missing HDFS_SITE_XML environment variable.")
     def test_xml_creds(self):
         xml_file = os.environ['HDFS_SITE_XML']
         topo = Topology()
         hdfs.scan(topo, credentials=xml_file, directory='a_dir')
         hdfs.scan(topo, credentials=xml_file, directory='a_dir', pattern='*.txt', init_delay=datetime.timedelta(seconds=5))
-
-    def test_bad_cred_param(self):
-        topo = Topology()
-        # expect ValueError because credentials is neither a dict nor a file
-        self.assertRaises(TypeError, hdfs.scan, topo, credentials='invalid', directory='any_dir')
-        # expect ValueError because credentials is not expected JSON format
-        invalid_creds = json.loads('{"user" : "user", "password" : "xx", "uri" : "xxx"}')
-        self.assertRaises(ValueError, hdfs.scan, topo, credentials=invalid_creds, directory='any_dir')
-
-    @unittest.skipIf(cloud_creds_env_var() == False, "Missing ANALYTICS_ENGINE environment variable.")
-    def test_bad_time_param(self):
-        creds_file = os.environ['ANALYTICS_ENGINE']
-        with open(creds_file) as data_file:
-            credentials = json.load(data_file)
-        topo = Topology()
-        # expect TypeError because init_delay is wrong type (string)
-        self.assertRaises(TypeError, hdfs.scan, topo, credentials=credentials, directory='any_dir', init_delay='1')
-        # expect ValueError because init_delay is too small (< 1 sec)
-        self.assertRaises(ValueError, hdfs.scan, topo, credentials=credentials, directory='any_dir', init_delay=0.1)
 
     @unittest.skipIf(cloud_creds_env_var() == False, "Missing ANALYTICS_ENGINE environment variable.")
     def test_bad_close_file_param(self):
@@ -106,8 +78,6 @@ class TestParams(unittest.TestCase):
         self.assertRaises(ValueError, hdfs.write, s, credentials=credentials, file='any_file', bytesPerFile=200, timePerFile=5, tuplesPerFile=5)
 
 
-
-
 class TestCompositeDistributed(unittest.TestCase):
 
     @classmethod
@@ -118,30 +88,19 @@ class TestCompositeDistributed(unittest.TestCase):
         Tester.setup_distributed(self)
         self.hdfs_toolkit_location = os.environ['STREAMS_HDFS_TOOLKIT']
 
-
-    def _build_only(self, name, topo):
-        result = streamsx.topology.context.submit("TOOLKIT", topo.graph) # creates tk* directory
-        print(name + ' (TOOLKIT):' + str(result))
-        assert(result.return_code == 0)
-        result = streamsx.topology.context.submit("BUNDLE", topo.graph)  # creates sab file
-        print(name + ' (BUNDLE):' + str(result))
-        assert(result.return_code == 0)
-
-     # ------------------------------------
+    # ------------------------------------
     @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
     def test_HdfsFileSink(self):
-        ae_service_creds_file = os.environ['ANALYTICS_ENGINE']
-        with open(ae_service_creds_file) as data_file:
-            credentials = data_file.read()
+
         hdfs_cfg_file = os.environ['HDFS_SITE_XML']
         credentials=hdfs_cfg_file
-        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
+
         topo = Topology('test_HdfsFileSink')
 
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
         
-        # The standart operator Beacon generates 1000 lines
+        # Beacon generates 1000 lines
         createLines = op.Source(topo, "spl.utility::Beacon", 'tuple<rstring line>', params = {'period':0.01, 'iterations':1000})
         createLines.line = createLines.output('"This line will be written into a HDFS file via HdfsFileSink. " + (rstring) IterationCount()')
 
@@ -165,12 +124,12 @@ class TestCompositeDistributed(unittest.TestCase):
         # Run the test
         tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
 
-     # ------------------------------------
-     # HdfsDirectoryScan delivers the file names in pytest directoty and HdfsFileSource opens and reads HDFS files. 
+    # ------------------------------------
+    # HdfsDirectoryScan delivers the file names in pytest directory and HdfsFileSource opens and reads HDFS files. 
     @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
     def test_HdfsFileSource(self):
         hdfs_cfg_file = os.environ['HDFS_SITE_XML']
-        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
+
         topo = Topology('test_HdfsFileSource')
 
         if self.hdfs_toolkit_location is not None:
@@ -214,9 +173,6 @@ class TestCompositeDistributed(unittest.TestCase):
 
     @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
     def test_HdfsFileCopy(self):
-        ae_service_creds_file = os.environ['ANALYTICS_ENGINE']
-        with open(ae_service_creds_file) as data_file:
-            credentials = data_file.read()
         hdfs_cfg_file = os.environ['HDFS_SITE_XML']
         credentials=hdfs_cfg_file
         # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
@@ -225,9 +181,7 @@ class TestCompositeDistributed(unittest.TestCase):
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
 
-
         dir_scan_output_schema = StreamSchema('tuple<rstring hdfsFileName>')
-
 
         dirScannParameters = {
             'initDelay': 2.0,
@@ -238,7 +192,6 @@ class TestCompositeDistributed(unittest.TestCase):
         scannedFileNames = topo.source(hdfs.HdfsDirectoryScan(credentials=credentials, directory='pytest', schema=dir_scan_output_schema, **dirScannParameters))
 
         scannedFileNames.print()
-        
  
         fileCopyParamaters = {
             'hdfsFileAttrName': 'hdfsFileName',
@@ -253,8 +206,6 @@ class TestCompositeDistributed(unittest.TestCase):
         copyFiles.print()
         tester = Tester(topo)
    
- #       tester.run_for(60)
-
         cfg = {}
         job_config = streamsx.topology.context.JobConfig(tracing='info')
         job_config.add(cfg)
@@ -262,7 +213,6 @@ class TestCompositeDistributed(unittest.TestCase):
 
         # Run the test
         tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
-
 
 
 class TestCompositeWebHdfs(unittest.TestCase):
@@ -275,35 +225,24 @@ class TestCompositeWebHdfs(unittest.TestCase):
         Tester.setup_distributed(self)
         self.hdfs_toolkit_location = os.environ['STREAMS_HDFS_TOOLKIT']
 
-
-    def _build_only(self, name, topo):
-        result = streamsx.topology.context.submit("TOOLKIT", topo.graph) # creates tk* directory
-        print(name + ' (TOOLKIT):' + str(result))
-        assert(result.return_code == 0)
-        result = streamsx.topology.context.submit("BUNDLE", topo.graph)  # creates sab file
-        print(name + ' (BUNDLE):' + str(result))
-        assert(result.return_code == 0)
-
-     # ------------------------------------
+    # ------------------------------------
     @unittest.skipIf(cloud_creds_env_var() == False, "Missing ANALYTICS_ENGINE environment variable.")
     def test_HdfsFileSink(self):
         ae_service_creds_file = os.environ['ANALYTICS_ENGINE']
         with open(ae_service_creds_file) as data_file:
             credentials = data_file.read()
-        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
+
         topo = Topology('test_HdfsFileSink')
 
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
         
-        # standart operator Beacon generates 1000 lines
+        # Beacon generates 1000 lines
         createLines = op.Source(topo, "spl.utility::Beacon", 'tuple<rstring line>', params = {'period':0.01, 'iterations':1000})
         createLines.line = createLines.output('"This line will be written into a HDFS file via HdfsFileSink. " + (rstring) IterationCount()')
-
         to_file = createLines.outputs[0]
+
         config = {
-            'hdfsUser': 'hdfs',
-            'configPath': 'etc',
             'tuplesPerFile': 100
         }
 
@@ -320,21 +259,20 @@ class TestCompositeWebHdfs(unittest.TestCase):
         # Run the test
         tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
 
-     # ------------------------------------
-     # HdfsDirectoryScan delivers the file names in pytest directoty and HdfsFileSource opens and reads HDFS files. 
+    # ------------------------------------
+    # HdfsDirectoryScan delivers the file names in pytest directoty and HdfsFileSource opens and reads HDFS files. 
     @unittest.skipIf(cloud_creds_env_var() == False, "Missing ANALYTICS_ENGINE environment variable.")
     def test_HdfsFileSource(self):
         ae_service_creds_file = os.environ['ANALYTICS_ENGINE']
         with open(ae_service_creds_file) as data_file:
             credentials = data_file.read()
-        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
+
         topo = Topology('test_HdfsFileSource')
 
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
 
         sample_schema = StreamSchema('tuple<rstring directory>')
-
 
         dirScanParameters = {
             'initDelay': 2.0,
@@ -345,7 +283,6 @@ class TestCompositeWebHdfs(unittest.TestCase):
         scannedFileNames = topo.source(hdfs.HdfsDirectoryScan(credentials=credentials, directory='pytest', schema=sample_schema, **dirScanParameters))
 
         scannedFileNames.print()
-        
  
         sourceParamaters = {
             'initDelay': 1.0
@@ -380,25 +317,14 @@ class TestFileSink(unittest.TestCase):
         Tester.setup_distributed(self)
         self.hdfs_toolkit_location = os.environ['STREAMS_HDFS_TOOLKIT']
 
-
-    def _build_only(self, name, topo):
-        result = streamsx.topology.context.submit("TOOLKIT", topo.graph) # creates tk* directory
-        print(name + ' (TOOLKIT):' + str(result))
-        assert(result.return_code == 0)
-        result = streamsx.topology.context.submit("BUNDLE", topo.graph)  # creates sab file
-        print(name + ' (BUNDLE):' + str(result))
-        assert(result.return_code == 0)
-
-     # ------------------------------------
+    # ------------------------------------
     @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
     def test_HdfsFileSink(self):
         hdfs_cfg_file = os.environ['HDFS_SITE_XML']
-        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
-        topo = Topology('test_composite')
+        topo = Topology('test_HdfsFileSink')
 
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
-
         
         pulse = op.Source(topo, "spl.utility::Beacon", 'tuple<rstring directory>', params = {'period':0.5, 'iterations':100})
         pulse.directory = pulse.output('"This line will be written into a HDFS file via HdfsFileSink. " + (rstring) IterationCount()')
@@ -433,26 +359,16 @@ class TestFileSource(unittest.TestCase):
         self.hdfs_toolkit_location = os.environ['STREAMS_HDFS_TOOLKIT']
 
 
-    def _build_only(self, name, topo):
-        result = streamsx.topology.context.submit("TOOLKIT", topo.graph) # creates tk* directory
-        print(name + ' (TOOLKIT):' + str(result))
-        assert(result.return_code == 0)
-        result = streamsx.topology.context.submit("BUNDLE", topo.graph)  # creates sab file
-        print(name + ' (BUNDLE):' + str(result))
-        assert(result.return_code == 0)
-
-     # ------------------------------------
+    # ------------------------------------
     @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
     def test_HdfsFileSource(self):
         hdfs_cfg_file = os.environ['HDFS_SITE_XML']
-        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
         topo = Topology('test_HdfsFileSource')
 
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
 
         sample_schema = StreamSchema('tuple<rstring directory>')
-
 
         options = {
             'initDelay': 2.0,
@@ -463,7 +379,6 @@ class TestFileSource(unittest.TestCase):
         scanned = topo.source(hdfs.HdfsDirectoryScan(credentials=hdfs_cfg_file, directory='pytest1', schema=sample_schema, **options))
 
         scanned.print()
-        
  
         sourceParamaters = {
             'configPath' : hdfs_cfg_file
@@ -486,7 +401,6 @@ class TestFileSource(unittest.TestCase):
 
 
 
-
 class TestDirScan(unittest.TestCase):
 
     @classmethod
@@ -497,32 +411,17 @@ class TestDirScan(unittest.TestCase):
         Tester.setup_distributed(self)
         self.hdfs_toolkit_location = os.environ['STREAMS_HDFS_TOOLKIT']
 
-
-    def _build_only(self, name, topo):
-        result = streamsx.topology.context.submit("TOOLKIT", topo.graph) # creates tk* directory
-        print(name + ' (TOOLKIT):' + str(result))
-        assert(result.return_code == 0)
-        result = streamsx.topology.context.submit("BUNDLE", topo.graph)  # creates sab file
-        print(name + ' (BUNDLE):' + str(result))
-        assert(result.return_code == 0)
-
-
-     # ------------------------------------
+    # ------------------------------------
     @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
     def test_HdfsDirectoryScan(self):
         hdfs_cfg_file = os.environ['HDFS_SITE_XML']
-        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
-        topo = Topology('test_composite')
+        topo = Topology('test_HdfsDirectoryScan')
 
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
 
         credentials=hdfs_cfg_file 
         directory='pytest1'
-        print ('\n---------'+str(self))
-        name = 'test_HdfsDirScan'
-        topo = Topology(name)
-
 
         sample_schema = StreamSchema('tuple<rstring directory>')
        
@@ -545,9 +444,6 @@ class TestDirScan(unittest.TestCase):
         # Run the test
         tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
 
- 
-
-
 
 
 class TestDistributed(unittest.TestCase):
@@ -562,12 +458,11 @@ class TestDistributed(unittest.TestCase):
         self.hdfs_toolkit_location = os.environ['STREAMS_HDFS_TOOLKIT']
 
 
-     # ------------------------------------
+    # ------------------------------------
     @unittest.skipIf(site_xml_env_var() == False, "HDFS_SITE_XML environment variable.")
-    def test_all_hdsf_operators(self):
+    def test_all_hdfs_operators(self):
         hdfs_cfg_file = os.environ['HDFS_SITE_XML']
-        # credentials is the path to the HDSF *configuration file 'hdfs-site.xml'
-        topo = Topology('test_all_hdsf_operators')
+        topo = Topology('test_all_hdfs_operators')
 
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
@@ -593,7 +488,6 @@ class TestDistributed(unittest.TestCase):
 
         tester = Tester(topo)
         tester.tuple_count(readLines, 1, exact=False)
-        # tester.run_for(80)
 
         cfg = {}
         job_config = streamsx.topology.context.JobConfig(tracing='info')
@@ -606,22 +500,22 @@ class TestDistributed(unittest.TestCase):
 
     # ------------------------------------
     @unittest.skipIf(cloud_creds_env_var() == False, "Missing ANALYTICS_ENGINE environment variable.")
-    def test_hdfs_read_with_credentaials(self):
+    def test_hdfs_read_with_credentials(self):
         ae_service_creds_file = os.environ['ANALYTICS_ENGINE']
         with open(ae_service_creds_file) as data_file:
             credentials = data_file.read()
-        # credentials is as JSON string
-        
-        topo = Topology('test_hdfs_uri')
+
+        # credentials is as JSON string        
+        topo = Topology('test_hdfs_read_with_credentials')
 
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
 
         s = topo.source(['Hello World!']).as_string()
-        result = hdfs.write(s, credentials=credentials, file='pytest/sample%FILENUM.txt')
+        result = hdfs.write(s, credentials=credentials, file='pytest/1sample%FILENUM.txt')
         result.print()
 
-        scanned_files = hdfs.scan(topo, credentials=credentials, directory='pytest', pattern='sample.*txt', init_delay=10)
+        scanned_files = hdfs.scan(topo, credentials=credentials, directory='pytest', pattern='1sample.*txt', init_delay=10)
         scanned_files.print()
 
         lines = hdfs.read(scanned_files, credentials=credentials)
@@ -638,8 +532,6 @@ class TestDistributed(unittest.TestCase):
 
         # Run the test
         tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
-
-    # ------------------------------------
 
 
     # ------------------------------------
@@ -648,17 +540,18 @@ class TestDistributed(unittest.TestCase):
         ae_service_creds_file = os.environ['ANALYTICS_ENGINE']
         with open(ae_service_creds_file) as data_file:
             credentials = json.load(data_file)
+
         # credentials is dict
         topo = Topology('test_hdfs_uri')
 
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
-       # creates an input stream
+        # creates an input stream
         fileSinkInputStream = topo.source(['This line will be written into a HDFS file.']).as_string()
-        result = hdfs.write(fileSinkInputStream, credentials=credentials, file='pytest/sample%FILENUM.txt')
+        result = hdfs.write(fileSinkInputStream, credentials=credentials, file='pytest/2sample%FILENUM.txt')
         result.print()
 
-        scanned_files = hdfs.scan(topo, credentials=credentials, directory='pytest', pattern='sample.*txt', init_delay=10)
+        scanned_files = hdfs.scan(topo, credentials=credentials, directory='pytest', pattern='2sample.*txt', init_delay=10)
         scanned_files.print()
 
         lines = hdfs.read(scanned_files, credentials=credentials)
@@ -677,15 +570,13 @@ class TestDistributed(unittest.TestCase):
         tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
 
     # ------------------------------------
-
-
     @unittest.skipIf(cloud_creds_env_var() == False, "Missing ANALYTICS_ENGINE environment variable.")
     def test_close_on_tuples(self):
         ae_service_creds_file = os.environ['ANALYTICS_ENGINE']
         with open(ae_service_creds_file) as data_file:
             credentials = json.load(data_file)
 
-        topo = Topology('test_hdfs_uri')
+        topo = Topology('test_close_on_tuples')
 
         if self.hdfs_toolkit_location is not None:
             tk.add_toolkit(topo, self.hdfs_toolkit_location)
@@ -705,8 +596,6 @@ class TestDistributed(unittest.TestCase):
 
         # Run the test
         tester.test(self.test_ctxtype, cfg, always_collect_logs=True)
-
-    # ------------------------------------
 
 
 class TestCloud(TestDistributed):
